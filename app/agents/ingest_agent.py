@@ -1,4 +1,6 @@
 import os
+import json
+import re
 from google import genai
 from google.genai import types
 from loguru import logger
@@ -11,26 +13,87 @@ REGION = os.getenv("GOOGLE_REGION", "us-central1")
 client = genai.Client(vertexai=True, project=PROJECT_ID, location=REGION)
 
 
-INGEST_SYSTEM_PROMPT = """You are a memory processing agent for a restaurant management system.
-Your task is to extract structured information from user messages.
+INGEST_SYSTEM_PROMPT = """You are a memory extraction agent that mimics how the human brain filters information.
+Your job: classify every piece of information by importance, then store ONLY what matters.
 
-For each message, you must output a JSON object with:
-- summary: A concise summary of the message (1-2 sentences)
-- entities: A list of named entities (product names, dates, amounts, user names, etc.)
-- topics: A list of topic tags from: ["product", "order", "policy", "complaint", "banner", "category", "combo", "notification", "user", "general"]
+MEMORY TIERS (like human brain):
 
-Output ONLY the JSON object, no other text.
+CORE — Identity & key context. Always remember.
+  What: name, role, relationship, core identity, main responsibility.
+  Example: "Trần Nhật Minh, quản lý nhà hàng" or "Khách VIP hay đặt bàn mỗi thứ 7"
 
-Example:
-Input: "Tôi muốn thêm sản phẩm mới là Phở Bò giá 50k"
-Output: {"summary": "Người dùng muốn thêm sản phẩm Phở Bò với giá 50.000đ", "entities": ["Phở Bò", "50000"], "topics": ["product"]}
+IMPORTANT — Actionable facts the system needs later. Remember when relevant.
+  What: specific requests, decisions, preferences, complaints, key skills, notable actions.
+  Example: "thích ăn cay", "yêu cầu giảm 20% cho combo", "phàn nàn món Bún Bò nguội"
+
+DETAIL — Specific but secondary. Store as searchable entities only.
+  What: exact dates, URLs, project names, tool names, certifications, exact numbers.
+  Example: "GPA 3.0/4.0", "github.com/xxx", "TOEIC 735"
+
+NOISE — Generic, obvious, or filler. Discard completely.
+  What: "good teamwork skills", "highly responsible", greetings, filler sentences.
+
+OUTPUT FORMAT — Return ONLY a JSON object:
+{
+  "summary": "ONLY CORE + IMPORTANT facts. Max 3-5 sentences. Must be specific, never generic.",
+  "entities": ["ONLY DETAIL-level items for search. Max 15-20 items. No generic phrases."],
+  "topics": ["Choose from: product, order, policy, complaint, banner, category, combo, notification, user, preference, general"]
+}
+
+EXAMPLES:
+
+Input: "User: Tôi là Trần Nhật Minh, quản lý của nhà hàng này. tôi làm việc cẩu thả, thích ăn chơi lười làm, tôi đẹp trai\\nAssistant: Chào anh Minh!"
+Output: {"summary": "Trần Nhật Minh, quản lý nhà hàng. Tự nhận xét: cẩu thả, thích ăn chơi, lười làm, đẹp trai.", "entities": ["Trần Nhật Minh", "quản lý nhà hàng"], "topics": ["user", "preference"]}
+
+Input: "User: Khách Nguyễn Văn An gọi phàn nàn Bún Bò nguội, phục vụ chậm, đòi hoàn tiền 50k\\nAssistant: Đã ghi nhận."
+Output: {"summary": "Khách Nguyễn Văn An phàn nàn Bún Bò nguội, phục vụ chậm, đòi hoàn tiền 50.000đ.", "entities": ["Nguyễn Văn An", "Bún Bò", "50000"], "topics": ["complaint", "product"]}
+
+Input: "User: [Long CV/document with education, skills, projects, certifications...]\\nAssistant: Đã nhận."
+Output: {"summary": "Trần Nhật Minh, sinh viên CNPM tại HCMUTE. Kinh nghiệm: Backend dev (Spring Boot, FastAPI), từng intern AI Backend tại Hitek Solution, làm RAG system. Có dự án e-commerce và e-learning.", "entities": ["HCMUTE", "GPA 3.0/4.0", "Hitek Solution", "Oct 2025-Jan 2026", "Jewelry Store", "E-Learning App", "TOEIC 735/990"], "topics": ["user"]}
+
+Input: "User: Doanh thu giảm 20%, combo Gia Đình bán 150 phần, combo Lãng Mạn chỉ 12 phần\\nAssistant: Phân tích ngay."
+Output: {"summary": "Doanh thu giảm 20%. Combo Gia Đình bán chạy (150 phần). Combo Lãng Mạn bán kém (12 phần).", "entities": ["giảm 20%", "combo Gia Đình", "150 phần", "combo Lãng Mạn", "12 phần"], "topics": ["order", "combo"]}
 """
+
+
+def _extract_json_from_llm(text: str) -> dict:
+    """Robustly extract JSON from LLM response, handling markdown code blocks."""
+    text = text.strip()
+
+    # Try 1: Direct JSON parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Try 2: Extract from markdown code block
+    pattern = r'```(?:json)?\s*\n?(.*?)\n?\s*```'
+    match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+    if match:
+        try:
+            return json.loads(match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    # Try 3: Find first { ... } in text
+    brace_match = re.search(r'\{.*\}', text, re.DOTALL)
+    if brace_match:
+        try:
+            return json.loads(brace_match.group())
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(f"Cannot extract JSON from LLM response: {text[:200]}")
 
 
 async def run_ingest_agent(user_id: str, message: str) -> dict:
     """
-    Process a user message and extract structured memory.
-    Returns the extracted memory data.
+    Process a user message and extract structured memory using tiered importance.
+    
+    Memory tiers (brain-inspired):
+    - CORE + IMPORTANT → stored in summary (3-5 sentences max)
+    - DETAIL → stored in entities (for search, max 15-20)
+    - NOISE → discarded completely
     """
     logger.info(f"Ingest Agent: Processing message for user {user_id}")
 
@@ -45,21 +108,12 @@ async def run_ingest_agent(user_id: str, message: str) -> dict:
 
     # Parse the JSON response
     try:
-        import json
-        result_text = response.text.strip()
-        # Remove markdown code block if present
-        if result_text.startswith("```"):
-            result_text = result_text.split("```")[1]
-            if result_text.startswith("json"):
-                result_text = result_text[4:]
-            result_text = result_text.strip()
-
-        memory_data = json.loads(result_text)
+        memory_data = _extract_json_from_llm(response.text)
 
         # Save to database
         memory_id = await save_memory(
             user_id=user_id,
-            summary=memory_data.get("summary", message[:100]),
+            summary=memory_data.get("summary", message[:200]),
             entities=memory_data.get("entities", []),
             topics=memory_data.get("topics", ["general"]),
             raw_message=message
@@ -78,14 +132,14 @@ async def run_ingest_agent(user_id: str, message: str) -> dict:
         # Fallback: save raw message
         memory_id = await save_memory(
             user_id=user_id,
-            summary=message[:100],
+            summary=message[:200],
             entities=[],
             topics=["general"],
             raw_message=message
         )
         return {
             "memory_id": memory_id,
-            "summary": message[:100],
+            "summary": message[:200],
             "entities": [],
             "topics": ["general"]
         }
