@@ -74,6 +74,11 @@ from app.tools.product_tools import (
 from app.tools.user_tools import get_all_customers, update_customer_status
 from app.tools.auth_tools import login
 from app.tools.search_tools import search_internet
+from app.tools.analytics_tools import (
+    get_analytics_summary, get_revenue_analytics, get_order_analytics,
+    get_product_analytics, get_top_selling_products, get_customer_analytics,
+    get_booking_analytics, get_analytics_insights
+)
 
 # RAG as a tool function
 async def search_documents(query: str) -> dict:
@@ -123,6 +128,14 @@ TOOL_FUNCTIONS = {
     "login": login,
     "search_internet": search_internet,
     "search_documents": search_documents,
+    "get_analytics_summary": get_analytics_summary,
+    "get_revenue_analytics": get_revenue_analytics,
+    "get_order_analytics": get_order_analytics,
+    "get_product_analytics": get_product_analytics,
+    "get_top_selling_products": get_top_selling_products,
+    "get_customer_analytics": get_customer_analytics,
+    "get_booking_analytics": get_booking_analytics,
+    "get_analytics_insights": get_analytics_insights,
 }
 
 # Define tool declarations for Gemini
@@ -652,6 +665,207 @@ TOOL_DECLARATIONS = [
                     "query": types.Schema(type=types.Type.STRING, description="Search query for internal documents")},
                 required=["query"]
             )
+        ),
+        # Analytics Tools
+        types.FunctionDeclaration(
+            name="get_analytics_summary",
+            description="""Get comprehensive analytics summary with all business metrics in one call.
+        This is the RECOMMENDED tool for AI agents to get complete business intelligence.
+
+        USE THIS TOOL WHEN:
+        - User asks for overall business performance or dashboard data
+        - Need complete analytics including revenue, orders, products, customers, bookings
+        - Want to understand business state at a glance
+        - User asks "how is the business doing?" or "show me the analytics"
+
+        RETURNS:
+        - revenue: Revenue metrics and trends
+        - orders: Order statistics and patterns  
+        - products: Top selling products
+        - customers: Customer engagement metrics
+        - bookings: Booking statistics
+        - insights: AI-ready insights and recommendations
+
+        PERIOD OPTIONS: TODAY, YESTERDAY, LAST_7_DAYS, LAST_30_DAYS, THIS_MONTH (default), LAST_MONTH, THIS_YEAR, CUSTOM
+        For CUSTOM period, provide startDate and endDate in ISO 8601 format.""",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "period": types.Schema(type=types.Type.STRING, description="Time period (default: THIS_MONTH)"),
+                    "start_date": types.Schema(type=types.Type.STRING, description="Custom start date (ISO 8601 format, for CUSTOM period)"),
+                    "end_date": types.Schema(type=types.Type.STRING, description="Custom end date (ISO 8601 format, for CUSTOM period)")
+                }
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_revenue_analytics",
+            description="""Get detailed revenue analytics and trends.
+
+        USE THIS TOOL WHEN:
+        - User specifically asks about revenue, sales, or income
+        - Need detailed revenue breakdown (today, yesterday, week, month, year)
+        - Want to analyze revenue growth and trends
+        - User asks "how much money did we make?" or "what's the revenue?"
+
+        RETURNS:
+        - totalRevenue: Total revenue for period (VND)
+        - todayRevenue, yesterdayRevenue: Daily revenue (VND)
+        - growthRate: Percentage change (today vs yesterday)
+        - averageOrderValue: Average order value (VND)
+        - trend: "increasing", "decreasing", or "stable"
+        - weekRevenue, monthRevenue, yearRevenue: Revenue breakdown""",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "period": types.Schema(type=types.Type.STRING, description="Time period (default: THIS_MONTH)"),
+                    "start_date": types.Schema(type=types.Type.STRING, description="Custom start date (ISO 8601)"),
+                    "end_date": types.Schema(type=types.Type.STRING, description="Custom end date (ISO 8601)")
+                }
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_order_analytics",
+            description="""Get order statistics and patterns.
+
+        USE THIS TOOL WHEN:
+        - User asks about orders, order status, or order volume
+        - Need to analyze order patterns and peak times
+        - Want to check pending/processing/completed orders
+        - User asks "how many orders?" or "what's the busiest time?"
+
+        RETURNS:
+        - totalOrders, pendingOrders, processingOrders, confirmedOrders, completedOrders, cancelledOrders
+        - cancelRate: Cancellation rate (%)
+        - ordersByStatus: Breakdown by status
+        - peakHour: Peak order time with hour, orderCount, revenue, timeRange
+        - ordersByHour: Orders distribution by hour""",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "period": types.Schema(type=types.Type.STRING, description="Time period (default: THIS_MONTH)"),
+                    "start_date": types.Schema(type=types.Type.STRING, description="Custom start date (ISO 8601)"),
+                    "end_date": types.Schema(type=types.Type.STRING, description="Custom end date (ISO 8601)")
+                }
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_product_analytics",
+            description="""Get product performance analytics with top selling products.
+
+        USE THIS TOOL WHEN:
+        - User asks about product performance or best sellers
+        - Need detailed product statistics (quantity sold, revenue, order count)
+        - Want to see both top selling and top revenue products
+        - User asks "what are the best sellers?" or "which products sell well?"
+
+        RETURNS:
+        - topSellingProducts: List by quantity sold (productId, name, imageUrl, quantity, revenue, orderCount, averagePrice, rank)
+        - topRevenueProducts: List by total revenue
+        - totalProductsSold: Total quantity sold
+        - uniqueProductsSold: Number of unique products sold""",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "limit": types.Schema(type=types.Type.INTEGER, description="Number of top products to return (default: 10)"),
+                    "period": types.Schema(type=types.Type.STRING, description="Time period (default: THIS_MONTH)"),
+                    "start_date": types.Schema(type=types.Type.STRING, description="Custom start date (ISO 8601)"),
+                    "end_date": types.Schema(type=types.Type.STRING, description="Custom end date (ISO 8601)")
+                }
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_top_selling_products",
+            description="""Quickly get only the top selling products (shortcut endpoint).
+
+        USE THIS TOOL WHEN:
+        - User only wants product names and quantities (simplified view)
+        - Don't need detailed revenue/order statistics
+        - Want faster response with minimal data
+
+        RETURNS: List of top products with productId, productName, totalQuantitySold, rank only""",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "limit": types.Schema(type=types.Type.INTEGER, description="Number of top products (default: 10)"),
+                    "period": types.Schema(type=types.Type.STRING, description="Time period (default: THIS_MONTH)"),
+                    "start_date": types.Schema(type=types.Type.STRING, description="Custom start date (ISO 8601)"),
+                    "end_date": types.Schema(type=types.Type.STRING, description="Custom end date (ISO 8601)")
+                }
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_customer_analytics",
+            description="""Get customer engagement and retention metrics.
+
+        USE THIS TOOL WHEN:
+        - User asks about customers, customer base, or user statistics
+        - Need customer retention and engagement metrics
+        - Want to analyze customer behavior
+        - User asks "how many customers?" or "what's the retention rate?"
+
+        RETURNS:
+        - totalCustomers: Total number of customers
+        - newCustomers: New customers in period
+        - activeCustomers: Customers who made orders
+        - averageOrdersPerCustomer: Average orders per customer
+        - retentionRate: Customer retention rate (%)""",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "period": types.Schema(type=types.Type.STRING, description="Time period (default: THIS_MONTH)"),
+                    "start_date": types.Schema(type=types.Type.STRING, description="Custom start date (ISO 8601)"),
+                    "end_date": types.Schema(type=types.Type.STRING, description="Custom end date (ISO 8601)")
+                }
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_booking_analytics",
+            description="""Get table booking statistics.
+
+        USE THIS TOOL WHEN:
+        - User asks about bookings, reservations, or table status
+        - Need booking statistics by status (pending, confirmed, completed, denied)
+        - Want to check no-show rate
+        - User asks "how many bookings?" or "what's the booking status?"
+
+        RETURNS:
+        - totalBookings, customerBookings, guestBookings, todayBookings
+        - pendingBookings, confirmedBookings, completedBookings, deniedBookings
+        - noShowRate: No-show rate (%)
+        - bookingsByStatus: Breakdown by status""",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "period": types.Schema(type=types.Type.STRING, description="Time period (default: THIS_MONTH)"),
+                    "start_date": types.Schema(type=types.Type.STRING, description="Custom start date (ISO 8601)"),
+                    "end_date": types.Schema(type=types.Type.STRING, description="Custom end date (ISO 8601)")
+                }
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_analytics_insights",
+            description="""Get AI-ready insights and recommendations based on current analytics.
+        This endpoint analyzes all metrics and generates natural language insights.
+
+        USE THIS TOOL WHEN:
+        - User asks for insights, recommendations, or analysis
+        - Want AI-generated observations about business performance
+        - Need to highlight key trends or issues
+        - User asks "what should I know?" or "any recommendations?"
+
+        RETURNS:
+        List of insights with:
+        - type: "positive" (good news), "negative" (warning), "neutral" (info), "recommendation" (suggestion)
+        - category: "revenue", "orders", "products", "customers", "bookings"
+        - message: Human-readable insight (in Vietnamese)
+        - value: Numeric value if applicable
+        - unit: Unit of measurement (%, portions, VND, etc.)
+
+        EXAMPLES:
+        - "Doanh thu hôm nay tăng 25.0% so với hôm qua"
+        - "Sản phẩm bán chạy nhất: Phở Bò (250 phần)"
+        - "Nên tăng cường marketing để duy trì momentum" """,
+            parameters=types.Schema(type=types.Type.OBJECT, properties={})
         ),
     ])
 ]
