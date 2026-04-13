@@ -297,6 +297,236 @@ MANAGEMENT_DECLARATIONS = [
             )
         ),
 
+        # ── Voucher ──
+        types.FunctionDeclaration(
+            name="get_public_vouchers",
+            description="Get all public vouchers visible to customers. No auth required.",
+            parameters=types.Schema(type=types.Type.OBJECT, properties={})
+        ),
+        types.FunctionDeclaration(
+            name="get_all_vouchers_admin",
+            description="""Get all vouchers with pagination (admin view — includes inactive/expired).
+        RULES: Call before update/delete/toggle to resolve voucher_id or check duplicates by code.""",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "page": types.Schema(type=types.Type.INTEGER, description="Page index (default 0)"),
+                    "size": types.Schema(type=types.Type.INTEGER, description="Page size (default 50)"),
+                    "sort_by": types.Schema(type=types.Type.STRING, description="Field to sort by (default 'id')"),
+                    "sort_dir": types.Schema(type=types.Type.STRING, description="asc or desc (default desc)")
+                }
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_voucher_by_id",
+            description="Get voucher detail by id (admin).",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"voucher_id": types.Schema(type=types.Type.INTEGER, description="Voucher ID")},
+                required=["voucher_id"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_voucher_by_code",
+            description="Look up a voucher by its code string (e.g., 'SUMMER2026').",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"code": types.Schema(type=types.Type.STRING, description="Voucher code")},
+                required=["code"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="create_voucher",
+            description="""Create a new voucher.
+        REQUIRED: code (unique), name, type (PERCENTAGE|FIXED_AMOUNT|FREE_SHIPPING),
+        discount_value, start_date (ISO 8601), end_date (ISO 8601).
+        RULES: Check code uniqueness via get_voucher_by_code first.
+        PERCENTAGE → discount_value is 0-100 and max_discount_amount caps the discount.
+        FIXED_AMOUNT → discount_value is absolute VND.""",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "code": types.Schema(type=types.Type.STRING, description="Unique voucher code"),
+                    "name": types.Schema(type=types.Type.STRING, description="Display name"),
+                    "type": types.Schema(type=types.Type.STRING, description="PERCENTAGE|FIXED_AMOUNT|FREE_SHIPPING"),
+                    "discount_value": types.Schema(type=types.Type.NUMBER, description="Percent (0-100) or absolute amount"),
+                    "start_date": types.Schema(type=types.Type.STRING, description="Start date (ISO 8601)"),
+                    "end_date": types.Schema(type=types.Type.STRING, description="End date (ISO 8601)"),
+                    "description": types.Schema(type=types.Type.STRING, description="Description (optional)"),
+                    "min_order_value": types.Schema(type=types.Type.NUMBER, description="Min order total to apply"),
+                    "max_discount_amount": types.Schema(type=types.Type.NUMBER, description="Cap for PERCENTAGE type"),
+                    "usage_limit": types.Schema(type=types.Type.INTEGER, description="Total usage cap"),
+                    "usage_limit_per_user": types.Schema(type=types.Type.INTEGER, description="Per-user usage cap"),
+                    "is_public": types.Schema(type=types.Type.BOOLEAN, description="Visible to all users (default true)")
+                },
+                required=["code", "name", "type", "discount_value", "start_date", "end_date"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="update_voucher",
+            description="Update an existing voucher. Resolve voucher_id via get_all_vouchers_admin if needed.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "voucher_id": types.Schema(type=types.Type.INTEGER, description="Voucher ID"),
+                    "code": types.Schema(type=types.Type.STRING, description="New code"),
+                    "name": types.Schema(type=types.Type.STRING, description="New name"),
+                    "type": types.Schema(type=types.Type.STRING, description="New type"),
+                    "discount_value": types.Schema(type=types.Type.NUMBER, description="New discount value"),
+                    "start_date": types.Schema(type=types.Type.STRING, description="New start date"),
+                    "end_date": types.Schema(type=types.Type.STRING, description="New end date"),
+                    "description": types.Schema(type=types.Type.STRING, description="New description"),
+                    "min_order_value": types.Schema(type=types.Type.NUMBER, description="New min order value"),
+                    "max_discount_amount": types.Schema(type=types.Type.NUMBER, description="New cap"),
+                    "usage_limit": types.Schema(type=types.Type.INTEGER, description="New total cap"),
+                    "usage_limit_per_user": types.Schema(type=types.Type.INTEGER, description="New per-user cap"),
+                    "is_public": types.Schema(type=types.Type.BOOLEAN, description="Public visibility")
+                },
+                required=["voucher_id"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="delete_voucher",
+            description="Delete a voucher. Resolve id via get_all_vouchers_admin / get_voucher_by_code.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"voucher_id": types.Schema(type=types.Type.INTEGER, description="Voucher ID")},
+                required=["voucher_id"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="toggle_voucher_status",
+            description="Toggle voucher ACTIVE <-> INACTIVE.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"voucher_id": types.Schema(type=types.Type.INTEGER, description="Voucher ID")},
+                required=["voucher_id"]
+            )
+        ),
+
+        # ── Order ──
+        types.FunctionDeclaration(
+            name="get_all_orders_admin",
+            description="""Get all orders with pagination (admin).
+        STATUS FILTER: WAITING_FOR_PAYMENT | PENDING | CONFIRMED | SHIPPING | DELIVERED | COMPLETED | CANCELED
+        RULES: Use when user wants to view/list orders or find a specific order by filtering.""",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "status": types.Schema(type=types.Type.STRING, description="EOrderStatus filter (optional)"),
+                    "page": types.Schema(type=types.Type.INTEGER, description="Page index (default 0)"),
+                    "size": types.Schema(type=types.Type.INTEGER, description="Page size (default 20)")
+                }
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_order_detail_admin",
+            description="Get full order details by id (items, customer, payment, status).",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"order_id": types.Schema(type=types.Type.INTEGER, description="Order ID")},
+                required=["order_id"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="update_order_status",
+            description="""Update order status.
+        ALLOWED: WAITING_FOR_PAYMENT | PENDING | CONFIRMED | SHIPPING | DELIVERED | COMPLETED | CANCELED
+        RULES: Follow natural lifecycle — don't skip backwards unless canceling.""",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "order_id": types.Schema(type=types.Type.INTEGER, description="Order ID"),
+                    "status": types.Schema(type=types.Type.STRING, description="New EOrderStatus value")
+                },
+                required=["order_id", "status"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="delete_order",
+            description="Delete an order (admin, permanent). Confirm intent before calling.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"order_id": types.Schema(type=types.Type.INTEGER, description="Order ID")},
+                required=["order_id"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_order_reviews",
+            description="Get all reviews for a specific order.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"order_id": types.Schema(type=types.Type.INTEGER, description="Order ID")},
+                required=["order_id"]
+            )
+        ),
+
+        # ── Tag ──
+        types.FunctionDeclaration(
+            name="get_all_tags",
+            description="Get all tags. Call before create/update/delete to check duplicates or resolve id.",
+            parameters=types.Schema(type=types.Type.OBJECT, properties={})
+        ),
+        types.FunctionDeclaration(
+            name="get_tag_by_id",
+            description="Get a specific tag by ID.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"tag_id": types.Schema(type=types.Type.INTEGER, description="Tag ID")},
+                required=["tag_id"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="create_tag",
+            description="Create a new tag. Check duplicates via get_all_tags first.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"name": types.Schema(type=types.Type.STRING, description="Tag name")},
+                required=["name"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="update_tag",
+            description="Update tag name. Resolve id via get_all_tags if needed.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "tag_id": types.Schema(type=types.Type.INTEGER, description="Tag ID"),
+                    "name": types.Schema(type=types.Type.STRING, description="New name")
+                },
+                required=["tag_id", "name"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="delete_tag",
+            description="Delete a tag.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"tag_id": types.Schema(type=types.Type.INTEGER, description="Tag ID")},
+                required=["tag_id"]
+            )
+        ),
+
+        # ── Review (read-only) ──
+        types.FunctionDeclaration(
+            name="get_reviews_by_order",
+            description="Get all reviews attached to a specific order.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"order_id": types.Schema(type=types.Type.INTEGER, description="Order ID")},
+                required=["order_id"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_review_by_order_item",
+            description="Get the review of a specific order item (per-product review).",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"order_item_id": types.Schema(type=types.Type.INTEGER, description="Order item ID")},
+                required=["order_item_id"]
+            )
+        ),
+
         # ── Auth ──
         types.FunctionDeclaration(
             name="login",
@@ -454,6 +684,89 @@ ANALYTICS_DECLARATIONS = [
             description="Get customer list for customer analysis.",
             parameters=types.Schema(type=types.Type.OBJECT, properties={})
         ),
+        types.FunctionDeclaration(
+            name="get_all_tags",
+            description="Get all tags for tag-based product segmentation analysis.",
+            parameters=types.Schema(type=types.Type.OBJECT, properties={})
+        ),
+
+        # ── Order data for deeper analysis ──
+        types.FunctionDeclaration(
+            name="get_all_orders_admin",
+            description="""Fetch raw order list for cross-analysis (revenue breakdown, delivery patterns, cancel reasons).
+        STATUS FILTER: WAITING_FOR_PAYMENT | PENDING | CONFIRMED | SHIPPING | DELIVERED | COMPLETED | CANCELED""",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "status": types.Schema(type=types.Type.STRING, description="Filter by EOrderStatus (optional)"),
+                    "page": types.Schema(type=types.Type.INTEGER, description="Page index (default 0)"),
+                    "size": types.Schema(type=types.Type.INTEGER, description="Page size (default 20)")
+                }
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_order_detail_admin",
+            description="Get full details of an order (items, customer, payment) for deep-dive analysis.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"order_id": types.Schema(type=types.Type.INTEGER, description="Order ID")},
+                required=["order_id"]
+            )
+        ),
+
+        # ── Voucher data for promotion analysis ──
+        types.FunctionDeclaration(
+            name="get_all_vouchers_admin",
+            description="Get all vouchers to analyze promotion effectiveness, usage rates, and discount impact.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "page": types.Schema(type=types.Type.INTEGER, description="Page index (default 0)"),
+                    "size": types.Schema(type=types.Type.INTEGER, description="Page size (default 50)"),
+                    "sort_by": types.Schema(type=types.Type.STRING, description="Sort field"),
+                    "sort_dir": types.Schema(type=types.Type.STRING, description="asc or desc")
+                }
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_voucher_by_id",
+            description="Get voucher detail for analyzing a specific promotion's performance.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"voucher_id": types.Schema(type=types.Type.INTEGER, description="Voucher ID")},
+                required=["voucher_id"]
+            )
+        ),
+
+        # ── Review / sentiment data ──
+        types.FunctionDeclaration(
+            name="get_order_reviews",
+            description="Get all reviews for an order. Use for sentiment analysis or quality monitoring.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"order_id": types.Schema(type=types.Type.INTEGER, description="Order ID")},
+                required=["order_id"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_reviews_by_order",
+            description="Get all reviews attached to an order (alias for cross-referencing review data).",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"order_id": types.Schema(type=types.Type.INTEGER, description="Order ID")},
+                required=["order_id"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_review_by_order_item",
+            description="Get per-product review for a specific order item (for product quality scoring).",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"order_item_id": types.Schema(type=types.Type.INTEGER, description="Order item ID")},
+                required=["order_item_id"]
+            )
+        ),
+
         types.FunctionDeclaration(
             name="search_internet",
             description="Search internet for benchmarks or industry data.",

@@ -27,6 +27,20 @@ from app.tools.analytics_tools import (
     get_product_analytics, get_top_selling_products, get_customer_analytics,
     get_booking_analytics, get_analytics_insights
 )
+from app.tools.voucher_tools import (
+    get_public_vouchers, get_all_vouchers_admin, get_voucher_by_id, get_voucher_by_code,
+    create_voucher, update_voucher, delete_voucher, toggle_voucher_status
+)
+from app.tools.order_tools import (
+    get_all_orders_admin, get_order_detail_admin, update_order_status,
+    delete_order, get_order_reviews
+)
+from app.tools.tag_tools import (
+    get_all_tags, get_tag_by_id, create_tag, update_tag, delete_tag
+)
+from app.tools.review_tools import (
+    get_reviews_by_order, get_review_by_order_item
+)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -78,6 +92,30 @@ ALL_TOOL_FUNCTIONS = {
     "get_customer_analytics": get_customer_analytics,
     "get_booking_analytics": get_booking_analytics,
     "get_analytics_insights": get_analytics_insights,
+    # Voucher
+    "get_public_vouchers": get_public_vouchers,
+    "get_all_vouchers_admin": get_all_vouchers_admin,
+    "get_voucher_by_id": get_voucher_by_id,
+    "get_voucher_by_code": get_voucher_by_code,
+    "create_voucher": create_voucher,
+    "update_voucher": update_voucher,
+    "delete_voucher": delete_voucher,
+    "toggle_voucher_status": toggle_voucher_status,
+    # Order
+    "get_all_orders_admin": get_all_orders_admin,
+    "get_order_detail_admin": get_order_detail_admin,
+    "update_order_status": update_order_status,
+    "delete_order": delete_order,
+    "get_order_reviews": get_order_reviews,
+    # Tag
+    "get_all_tags": get_all_tags,
+    "get_tag_by_id": get_tag_by_id,
+    "create_tag": create_tag,
+    "update_tag": update_tag,
+    "delete_tag": delete_tag,
+    # Review
+    "get_reviews_by_order": get_reviews_by_order,
+    "get_review_by_order_item": get_review_by_order_item,
 }
 
 
@@ -98,6 +136,16 @@ MANAGEMENT_TOOL_NAMES = [
     "get_search_products", "create_product", "update_product", "delete_product", "toggle_product_status",
     # User
     "get_all_customers", "update_customer_status",
+    # Voucher CRUD
+    "get_public_vouchers", "get_all_vouchers_admin", "get_voucher_by_id", "get_voucher_by_code",
+    "create_voucher", "update_voucher", "delete_voucher", "toggle_voucher_status",
+    # Order management
+    "get_all_orders_admin", "get_order_detail_admin", "update_order_status",
+    "delete_order", "get_order_reviews",
+    # Tag CRUD
+    "get_all_tags", "get_tag_by_id", "create_tag", "update_tag", "delete_tag",
+    # Review (read-only)
+    "get_reviews_by_order", "get_review_by_order_item",
     # Auth
     "login",
     # Utility
@@ -111,6 +159,13 @@ ANALYTICS_TOOL_NAMES = [
     "get_booking_analytics", "get_analytics_insights",
     # Shared READ tools (for supplementary data)
     "get_search_products", "get_all_combos", "get_categories", "get_all_customers",
+    "get_all_tags",
+    # Order data (for deeper order/revenue analysis)
+    "get_all_orders_admin", "get_order_detail_admin",
+    # Voucher data (for promotion effectiveness analysis)
+    "get_all_vouchers_admin", "get_voucher_by_id",
+    # Review data (for sentiment / quality analysis)
+    "get_order_reviews", "get_reviews_by_order", "get_review_by_order_item",
     # Utility
     "search_internet",
 ]
