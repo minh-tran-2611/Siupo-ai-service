@@ -1,16 +1,8 @@
-import os
-import json
-import re
-from google import genai
 from google.genai import types
 from loguru import logger
 
+from app.utils.llm_utils import get_gemini_client, call_llm_with_retry, extract_json_from_llm
 from app.memory.sqlite_memory import save_memory
-
-PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID")
-REGION = os.getenv("GOOGLE_REGION", "us-central1")
-
-client = genai.Client(vertexai=True, project=PROJECT_ID, location=REGION)
 
 
 INGEST_SYSTEM_PROMPT = """You are a memory extraction agent that mimics how the human brain filters information.
@@ -56,36 +48,6 @@ Output: {"summary": "Doanh thu giảm 20%. Combo Gia Đình bán chạy (150 ph�
 """
 
 
-def _extract_json_from_llm(text: str) -> dict:
-    """Robustly extract JSON from LLM response, handling markdown code blocks."""
-    text = text.strip()
-
-    # Try 1: Direct JSON parse
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Try 2: Extract from markdown code block
-    pattern = r'```(?:json)?\s*\n?(.*?)\n?\s*```'
-    match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-    if match:
-        try:
-            return json.loads(match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-
-    # Try 3: Find first { ... } in text
-    brace_match = re.search(r'\{.*\}', text, re.DOTALL)
-    if brace_match:
-        try:
-            return json.loads(brace_match.group())
-        except json.JSONDecodeError:
-            pass
-
-    raise ValueError(f"Cannot extract JSON from LLM response: {text[:200]}")
-
-
 async def run_ingest_agent(user_id: str, message: str) -> dict:
     """
     Process a user message and extract structured memory using tiered importance.
@@ -97,18 +59,21 @@ async def run_ingest_agent(user_id: str, message: str) -> dict:
     """
     logger.info(f"Ingest Agent: Processing message for user {user_id}")
 
-    response = await client.aio.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=message,
-        config=types.GenerateContentConfig(
-            system_instruction=INGEST_SYSTEM_PROMPT,
-            temperature=0.1
+    client = get_gemini_client()
+    response = await call_llm_with_retry(
+        lambda: client.aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=message,
+            config=types.GenerateContentConfig(
+                system_instruction=INGEST_SYSTEM_PROMPT,
+                temperature=0.1
+            )
         )
     )
 
     # Parse the JSON response
     try:
-        memory_data = _extract_json_from_llm(response.text)
+        memory_data = extract_json_from_llm(response.text)
 
         # Save to database
         memory_id = await save_memory(

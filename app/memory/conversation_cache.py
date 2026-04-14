@@ -6,7 +6,6 @@ from datetime import datetime
 from typing import Optional
 from loguru import logger
 
-# Simple in-memory cache with manual TTL check
 # Format: {session_id: {"messages": [...], "last_access": datetime}}
 _cache: dict[str, dict] = {}
 
@@ -16,8 +15,12 @@ CACHE_TTL = 1800
 # Max messages per session (to limit token usage)
 MAX_MESSAGES = 20
 
+# Cleanup runs at most once every 5 minutes instead of on every cache access
+_CLEANUP_INTERVAL = 300
+_last_cleanup: datetime = datetime.min
 
-def _cleanup_expired():
+
+def _maybe_cleanup():
     """Remove expired sessions."""
     now = datetime.now()
     expired = [
@@ -27,6 +30,15 @@ def _cleanup_expired():
     for sid in expired:
         del _cache[sid]
         logger.debug(f"ConversationCache: Expired session {sid}")
+
+
+def _maybe_cleanup():
+    """Run cleanup only if enough time has passed since last run."""
+    global _last_cleanup
+    now = datetime.now()
+    if (now - _last_cleanup).total_seconds() >= _CLEANUP_INTERVAL:
+        _maybe_cleanup()
+        _last_cleanup = now
 
 
 def get_session_id(user_id: str, session_id: Optional[str] = None) -> str:
@@ -42,7 +54,7 @@ def get_conversation(user_id: str, session_id: Optional[str] = None) -> list[dic
     Get conversation history for a session.
     Returns list of {"role": "user"|"assistant", "content": "..."}
     """
-    _cleanup_expired()
+    _maybe_cleanup()
     sid = get_session_id(user_id, session_id)
     
     if sid in _cache:
@@ -57,7 +69,7 @@ def add_message(user_id: str, role: str, content: str, session_id: Optional[str]
     Add a message to conversation history.
     Role should be "user" or "assistant".
     """
-    _cleanup_expired()
+    _maybe_cleanup()
     sid = get_session_id(user_id, session_id)
     
     if sid not in _cache:
@@ -83,7 +95,7 @@ def clear_conversation(user_id: str, session_id: Optional[str] = None):
 
 def get_cache_stats() -> dict:
     """Get cache statistics for monitoring."""
-    _cleanup_expired()
+    _maybe_cleanup()
     return {
         "active_sessions": len(_cache),
         "total_messages": sum(len(d["messages"]) for d in _cache.values())

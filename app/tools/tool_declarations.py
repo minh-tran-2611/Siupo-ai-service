@@ -613,19 +613,6 @@ ANALYTICS_DECLARATIONS = [
             )
         ),
         types.FunctionDeclaration(
-            name="get_top_selling_products",
-            description="Quick shortcut: top selling products with name and quantity only.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "limit": types.Schema(type=types.Type.INTEGER, description="Top N (default: 10)"),
-                    "period": types.Schema(type=types.Type.STRING, description="Time period"),
-                    "start_date": types.Schema(type=types.Type.STRING, description="Start date"),
-                    "end_date": types.Schema(type=types.Type.STRING, description="End date")
-                }
-            )
-        ),
-        types.FunctionDeclaration(
             name="get_customer_analytics",
             description="Customer metrics: total, new, active, avg orders/customer, retention rate.",
             parameters=types.Schema(

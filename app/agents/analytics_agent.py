@@ -7,55 +7,17 @@ actionable recommendations.
 
 It runs in isolation with its own system prompt and tool set.
 """
-import os
 import json
-import asyncio
-import random
-from google import genai
 from google.genai import types
 from loguru import logger
 
 from app.utils.prompt_builder import get_analytics_prompt
+from app.utils.llm_utils import get_gemini_client, call_llm_with_retry, execute_tool
 from app.tools.tool_declarations import ANALYTICS_DECLARATIONS
 from app.tools.tool_registry import get_tool_functions, ANALYTICS_TOOL_NAMES
 
-PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID")
-REGION = os.getenv("GOOGLE_REGION", "us-central1")
-
-client = genai.Client(vertexai=True, project=PROJECT_ID, location=REGION)
-
 # Tool functions for this agent
 _tool_functions = get_tool_functions(ANALYTICS_TOOL_NAMES)
-
-
-async def _execute_tool(name: str, args: dict) -> str:
-    """Execute a tool function and return JSON result."""
-    logger.info(f"AnalyticsAgent: Executing tool: {name} with args: {args}")
-    try:
-        func = _tool_functions.get(name)
-        if not func:
-            return json.dumps({"error": f"Unknown tool: {name}"})
-
-        result = await func(**args)
-        return json.dumps(result, ensure_ascii=False, default=str)
-    except Exception as e:
-        logger.error(f"AnalyticsAgent: Tool execution error: {e}")
-        return json.dumps({"error": str(e)})
-
-
-async def _call_llm_with_retry(generate_coro_fn, max_retries: int = 3, base_delay: float = 1.0):
-    """Call LLM with exponential backoff retry for rate limiting."""
-    for attempt in range(max_retries):
-        try:
-            return await generate_coro_fn()
-        except Exception as e:
-            error_str = str(e)
-            if ("429" in error_str or "RESOURCE_EXHAUSTED" in error_str) and attempt < max_retries - 1:
-                delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
-                logger.warning(f"AnalyticsAgent: Rate limited, retrying in {delay:.2f}s (attempt {attempt + 1})")
-                await asyncio.sleep(delay)
-            else:
-                raise
 
 
 async def run_analytics_agent(task: str) -> str:
@@ -81,8 +43,10 @@ async def run_analytics_agent(task: str) -> str:
         tools=ANALYTICS_DECLARATIONS
     )
 
+    client = get_gemini_client()
+
     # Initial LLM call
-    response = await _call_llm_with_retry(
+    response = await call_llm_with_retry(
         lambda: client.aio.models.generate_content(
             model="gemini-2.5-flash",
             contents=contents,
@@ -113,7 +77,7 @@ async def run_analytics_agent(task: str) -> str:
         # Execute all function calls
         function_responses = []
         for fc in function_calls:
-            result = await _execute_tool(fc.name, dict(fc.args))
+            result = await execute_tool(_tool_functions, fc.name, dict(fc.args), label="AnalyticsAgent")
             function_responses.append(
                 types.Part.from_function_response(
                     name=fc.name,
@@ -126,7 +90,7 @@ async def run_analytics_agent(task: str) -> str:
         contents.append(types.Content(role="user", parts=function_responses))
 
         # Continue conversation
-        response = await _call_llm_with_retry(
+        response = await call_llm_with_retry(
             lambda: client.aio.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=contents,

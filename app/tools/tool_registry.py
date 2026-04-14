@@ -24,7 +24,7 @@ from app.tools.auth_tools import login
 from app.tools.search_tools import search_internet
 from app.tools.analytics_tools import (
     get_analytics_summary, get_revenue_analytics, get_order_analytics,
-    get_product_analytics, get_top_selling_products, get_customer_analytics,
+    get_product_analytics, get_customer_analytics,
     get_booking_analytics, get_analytics_insights
 )
 from app.tools.voucher_tools import (
@@ -88,7 +88,6 @@ ALL_TOOL_FUNCTIONS = {
     "get_revenue_analytics": get_revenue_analytics,
     "get_order_analytics": get_order_analytics,
     "get_product_analytics": get_product_analytics,
-    "get_top_selling_products": get_top_selling_products,
     "get_customer_analytics": get_customer_analytics,
     "get_booking_analytics": get_booking_analytics,
     "get_analytics_insights": get_analytics_insights,
@@ -155,7 +154,7 @@ MANAGEMENT_TOOL_NAMES = [
 ANALYTICS_TOOL_NAMES = [
     # Analytics endpoints
     "get_analytics_summary", "get_revenue_analytics", "get_order_analytics",
-    "get_product_analytics", "get_top_selling_products", "get_customer_analytics",
+    "get_product_analytics", "get_customer_analytics",
     "get_booking_analytics", "get_analytics_insights",
     # Shared READ tools (for supplementary data)
     "get_search_products", "get_all_combos", "get_categories", "get_all_customers",

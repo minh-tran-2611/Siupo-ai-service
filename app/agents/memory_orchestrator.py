@@ -1,15 +1,9 @@
-import os
-from google import genai
 from google.genai import types
 from loguru import logger
 
+from app.utils.llm_utils import get_gemini_client
 from app.agents.ingest_agent import run_ingest_agent
 from app.memory.sqlite_memory import save_memory
-
-PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID")
-REGION = os.getenv("GOOGLE_REGION", "us-central1")
-
-client = genai.Client(vertexai=True, project=PROJECT_ID, location=REGION)
 
 # Threshold: inputs longer than this trigger 2-step pipeline
 LONG_INPUT_THRESHOLD = 300
@@ -36,6 +30,7 @@ async def _evaluate_key_points(conversation: str) -> str | None:
     Returns a numbered list string, or None if extraction fails.
     """
     try:
+        client = get_gemini_client()
         response = await client.aio.models.generate_content(
             model="gemini-2.5-flash",
             contents=conversation,
@@ -130,8 +125,9 @@ async def ingest_memory(user_id: str, message: str, reply: str) -> None:
 
         full_conversation = f"User: {message}\nAssistant: {reply}"
 
-        # ── Tier 2: Short message → direct ingest (1 LLM call) ──
-        if len(message) <= LONG_INPUT_THRESHOLD:
+        # ── Tier 2: Short conversation → direct ingest (1 LLM call) ──
+        # Check full_conversation length (includes assistant reply, which can be very long)
+        if len(full_conversation) <= LONG_INPUT_THRESHOLD:
             ingest_result = await run_ingest_agent(user_id, full_conversation)
             logger.info(f"Memory Orchestrator: Short message ingested (1 LLM call) - {ingest_result}")
             return

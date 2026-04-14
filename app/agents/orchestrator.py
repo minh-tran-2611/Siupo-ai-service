@@ -9,27 +9,19 @@ Architecture:
 
 Sub-agents are exposed as meta-tools via Gemini function calling.
 """
-import os
 import json
 import asyncio
 import random
-from google import genai
 from google.genai import types
 from loguru import logger
 
 from app.utils.prompt_builder import get_orchestrator_prompt
+from app.utils.llm_utils import get_gemini_client, call_llm_with_retry
 from app.tools.tool_declarations import ORCHESTRATOR_DECLARATIONS
 from app.tools.search_tools import search_internet
 from app.agents.management_agent import run_management_agent
 from app.agents.analytics_agent import run_analytics_agent
-
-# RAG import
 from app.rag.retriever import retrieve_relevant_chunks
-
-PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID")
-REGION = os.getenv("GOOGLE_REGION", "us-central1")
-
-client = genai.Client(vertexai=True, project=PROJECT_ID, location=REGION)
 
 
 async def _search_documents(query: str) -> dict:
@@ -77,21 +69,6 @@ async def _execute_tool(name: str, args: dict) -> str:
         return json.dumps({"error": str(e)})
 
 
-async def _call_llm_with_retry(generate_coro_fn, max_retries: int = 3, base_delay: float = 1.0):
-    """Call LLM with exponential backoff retry for rate limiting."""
-    for attempt in range(max_retries):
-        try:
-            return await generate_coro_fn()
-        except Exception as e:
-            error_str = str(e)
-            if ("429" in error_str or "RESOURCE_EXHAUSTED" in error_str) and attempt < max_retries - 1:
-                delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
-                logger.warning(f"Orchestrator: Rate limited, retrying in {delay:.2f}s (attempt {attempt + 1})")
-                await asyncio.sleep(delay)
-            else:
-                raise
-
-
 async def run_orchestrator(user_id: str, message: str, memory_context: str,
                            conversation_history: list) -> str:
     """
@@ -133,8 +110,10 @@ async def run_orchestrator(user_id: str, message: str, memory_context: str,
         tools=ORCHESTRATOR_DECLARATIONS
     )
 
+    client = get_gemini_client()
+
     # Initial LLM call
-    response = await _call_llm_with_retry(
+    response = await call_llm_with_retry(
         lambda: client.aio.models.generate_content(
             model="gemini-2.5-flash",
             contents=contents,
@@ -178,7 +157,7 @@ async def run_orchestrator(user_id: str, message: str, memory_context: str,
         contents.append(types.Content(role="user", parts=function_responses))
 
         # Continue conversation
-        response = await _call_llm_with_retry(
+        response = await call_llm_with_retry(
             lambda: client.aio.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=contents,

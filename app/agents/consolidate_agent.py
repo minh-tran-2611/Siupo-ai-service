@@ -1,19 +1,14 @@
-import os
+import json
 from datetime import datetime
-from google import genai
 from google.genai import types
 from loguru import logger
 
+from app.utils.llm_utils import get_gemini_client, extract_json_from_llm
 from app.memory.sqlite_memory import (
     get_unconsolidated_memories,
     save_consolidated_memory,
     delete_memories_by_ids
 )
-
-PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID")
-REGION = os.getenv("GOOGLE_REGION", "us-central1")
-
-client = genai.Client(vertexai=True, project=PROJECT_ID, location=REGION)
 
 
 CONSOLIDATE_SYSTEM_PROMPT = """You are a memory consolidation agent for a restaurant management system.
@@ -74,6 +69,7 @@ async def run_consolidate_agent():
             memory_ids.append(m['id'])
 
         # Call LLM to consolidate (async)
+        client = get_gemini_client()
         response = await client.aio.models.generate_content(
             model="gemini-2.5-flash",
             contents=memory_text,
@@ -84,20 +80,8 @@ async def run_consolidate_agent():
         )
 
         try:
-            import json
-            result_text = response.text.strip()
-            # Remove markdown code block if present
-            if result_text.startswith("```"):
-                result_text = result_text.split("```")[1]
-                if result_text.startswith("json"):
-                    result_text = result_text[4:]
-                result_text = result_text.strip()
-
-            consolidated_list = json.loads(result_text)
-
-            # Ensure it's a list
-            if not isinstance(consolidated_list, list):
-                consolidated_list = [consolidated_list]
+            parsed = extract_json_from_llm(response.text)
+            consolidated_list = parsed if isinstance(parsed, list) else [parsed]
 
             # Save MULTIPLE consolidated memories
             saved_count = 0
