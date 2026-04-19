@@ -1,3 +1,4 @@
+import traceback
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
@@ -22,7 +23,7 @@ async def chat_endpoint(request: ChatRequest):
         reply = await chat(request.userId, request.message)
         return ChatResponse(reply=reply)
     except Exception as e:
-        logger.error(f"Chat endpoint error: {e}")
+        logger.error(f"Chat endpoint error: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

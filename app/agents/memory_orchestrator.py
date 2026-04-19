@@ -1,7 +1,7 @@
 from google.genai import types
 from loguru import logger
 
-from app.utils.llm_utils import get_gemini_client
+from app.utils.llm_utils import get_gemini_client, call_llm_with_retry
 from app.agents.ingest_agent import run_ingest_agent
 from app.memory.sqlite_memory import save_memory
 
@@ -31,13 +31,15 @@ async def _evaluate_key_points(conversation: str) -> str | None:
     """
     try:
         client = get_gemini_client()
-        response = await client.aio.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=conversation,
-            config=types.GenerateContentConfig(
-                system_instruction=EVALUATE_PROMPT,
-                temperature=0.1,
-                max_output_tokens=300  # Keep it short — just a list
+        response = await call_llm_with_retry(
+            lambda: client.aio.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=conversation,
+                config=types.GenerateContentConfig(
+                    system_instruction=EVALUATE_PROMPT,
+                    temperature=0.1,
+                    max_output_tokens=300
+                )
             )
         )
         key_points = response.text.strip() if response.text else None

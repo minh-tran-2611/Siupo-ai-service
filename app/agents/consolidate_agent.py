@@ -1,9 +1,8 @@
-import json
 from datetime import datetime
 from google.genai import types
 from loguru import logger
 
-from app.utils.llm_utils import get_gemini_client, extract_json_from_llm
+from app.utils.llm_utils import get_gemini_client, call_llm_with_retry, extract_json_from_llm
 from app.memory.sqlite_memory import (
     get_unconsolidated_memories,
     save_consolidated_memory,
@@ -68,14 +67,16 @@ async def run_consolidate_agent():
             memory_text += f"- {m['summary']} (entities: {m['entities']}, topics: {m['topics']})\n"
             memory_ids.append(m['id'])
 
-        # Call LLM to consolidate (async)
+        # Call LLM to consolidate (with retry for rate limiting)
         client = get_gemini_client()
-        response = await client.aio.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=memory_text,
-            config=types.GenerateContentConfig(
-                system_instruction=CONSOLIDATE_SYSTEM_PROMPT,
-                temperature=0.1
+        response = await call_llm_with_retry(
+            lambda: client.aio.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=memory_text,
+                config=types.GenerateContentConfig(
+                    system_instruction=CONSOLIDATE_SYSTEM_PROMPT,
+                    temperature=0.1
+                )
             )
         )
 

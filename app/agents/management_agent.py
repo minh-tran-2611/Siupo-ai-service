@@ -7,7 +7,6 @@ notifications, users).
 
 It runs in isolation with its own system prompt and tool set.
 """
-import json
 from google.genai import types
 from loguru import logger
 

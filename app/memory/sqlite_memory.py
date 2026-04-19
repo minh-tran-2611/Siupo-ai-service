@@ -3,7 +3,6 @@ import json
 import asyncio
 import libsql_client
 from contextlib import contextmanager
-from typing import Optional
 from loguru import logger
 
 TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL", "")
