@@ -10,6 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from app.controller.chat_controller import router as chat_router
+from app.controller.agents_controller import router as agents_router
+from app.controller.files_controller import router as files_router
 from app.memory.sqlite_memory import init_db
 from app.rag.retriever import init_collection
 from app.rag.embedder import init_embedder
@@ -75,6 +77,8 @@ app.add_middleware(
 
 # Include routers
 app.include_router(chat_router, prefix="/api", tags=["Chat"])
+app.include_router(agents_router, prefix="/api", tags=["Agents"])
+app.include_router(files_router, prefix="/api", tags=["Files"])
 
 
 @app.get("/health")

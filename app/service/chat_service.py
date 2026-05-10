@@ -1,20 +1,34 @@
 """
 Chat Service — Thin orchestration layer.
 
-Responsibilities:
-1. Fetch long-term memories + conversation history
-2. Delegate to Orchestrator Agent (which routes to sub-agents)
-3. Cache conversation + schedule memory ingest in background
-
-All tool logic, prompts, and LLM calls are handled by the agent layer.
+Flow (lazy-write strategy):
+1. Fetch long-term memories (consolidated + raw rows from previous sessions only)
+2. Read current session from cache (cache is the truth for current session)
+3. Add user turn to cache (NO Turso write per turn — flush happens on eviction)
+4. Start a task row (Task Pipeline)
+5. Run orchestrator with current images + cache history
+6. Add assistant reply to cache
+7. Background: describe_image to replace bytes with text in cache; classifier
 """
 import asyncio
+import time
 from loguru import logger
 
-from app.agents.orchestrator import run_orchestrator
-from app.agents.memory_orchestrator import ingest_memory
-from app.memory.sqlite_memory import get_memories_by_user, get_consolidated_memories_by_user
-from app.memory.conversation_cache import get_conversation, add_message, clear_conversation
+from app.agents.orchestrator import run_orchestrator, current_task_id, _tool_sequence
+from app.agents.image_describer import describe_image
+from app.agents.topic_classifier import classify_message
+from app.memory.sqlite_memory import (
+    get_memories_by_user,
+    get_consolidated_memories_by_user,
+)
+from app.memory.conversation_cache import (
+    get_conversation,
+    add_message,
+    get_session_start,
+    replace_images_with_description,
+)
+from app.memory.task_log import start_task, end_task, finalize_classification
+from app.events.agent_event_bus import emit as emit_event
 
 
 def format_memory_context(memories: list[dict], consolidated: list[dict]) -> str:
@@ -27,59 +41,151 @@ def format_memory_context(memories: list[dict], consolidated: list[dict]) -> str
     # Consolidated memories (important summaries)
     if consolidated:
         parts.append("Tóm tắt về người dùng:")
-        for m in consolidated[:5]:  # Limit to 5
+        for m in consolidated[:5]:
             parts.append(f"- {m['summary']}")
 
-    # Recent memories
+    # Recent raw memories from previous sessions (raw_message is the truth)
     if memories:
-        parts.append("\nHội thoại gần đây:")
-        for m in memories[:10]:  # Limit to 10 most recent
-            parts.append(f"- {m['summary']}")
+        parts.append("\nHội thoại trước đây:")
+        for m in memories[:10]:
+            text = m.get("raw_message") or m.get("summary") or ""
+            if text:
+                parts.append(f"- {text}")
 
     return "\n".join(parts)
 
 
-async def chat(user_id: str, message: str) -> str:
-    """
-    Main chat function — thin layer that coordinates memory, orchestrator, and caching.
+async def _classify_and_finalize(task_id: str, user_message: str, response: str):
+    """Background task: run classifier and update is_task + topic on the row."""
+    emit_event("worker.start", worker_id="topic_classifier", task_id=task_id)
+    try:
+        result = await classify_message(user_message, response)
+        await finalize_classification(task_id, result["is_task"], result["topic"])
+    except Exception as e:
+        logger.error(f"Chat: Classifier finalize failed for task {task_id}: {e}")
+    finally:
+        emit_event("worker.end", worker_id="topic_classifier", task_id=task_id)
 
-    Flow:
-    1. Fetch memories (long-term) and conversation history (short-term)
-    2. Delegate to Orchestrator Agent (which routes to management/analytics sub-agents)
-    3. Cache conversation + schedule memory ingest in background
-    """
-    logger.info(f"Chat: Processing message from user {user_id}")
 
-    # Step 1: Fetch long-term memories
+async def _describe_and_replace(user_id: str, turn_id: int, images: list[dict], hint: str, task_id: str | None = None):
+    """Background: describe each image and replace bytes in cache with text.
+
+    Runs concurrently for multiple images. Uses the first image's description
+    (joined if several) for the replacement. Cache then frees the bytes.
+    """
+    emit_event("worker.start", worker_id="image_describer", task_id=task_id)
+    try:
+        descriptions = await asyncio.gather(*[
+            describe_image(img["bytes"], img["mime"], hint=hint) for img in images
+        ])
+        joined = " | ".join(d for d in descriptions if d)
+        if not joined:
+            joined = "không thể mô tả ảnh"
+        replace_images_with_description(user_id, turn_id, joined)
+    except Exception as e:
+        logger.error(f"Chat: image describe-and-replace failed: {e}")
+    finally:
+        emit_event("worker.end", worker_id="image_describer", task_id=task_id)
+
+
+async def chat(user_id: str, message: str, images: list[dict] | None = None) -> str:
+    """
+    Main chat function — coordinates memory, orchestrator, task log, and caching.
+
+    Args:
+        user_id: User identifier
+        message: User text message
+        images: Optional list of {bytes, mime} dicts for inline image attachments
+    """
+    images = images or []
+    logger.info(
+        f"Chat: Processing message from user {user_id}, "
+        f"has_images={bool(images)}, count={len(images)}"
+    )
+
+    # Step 1: Determine session boundary BEFORE adding the new message
+    # (so memories filter excludes anything written in this session by past flushes)
+    session_start = get_session_start(user_id)
+    before_iso = session_start.isoformat(sep=" ") if session_start else None
+
+    # Step 2: Fetch long-term memories — previous sessions only (no overlap with cache)
     memories, consolidated = await asyncio.gather(
-        get_memories_by_user(user_id, limit=10),
-        get_consolidated_memories_by_user(user_id, limit=5)
+        get_memories_by_user(
+            user_id,
+            limit=10,
+            before=before_iso,
+            only_unconsolidated=True,
+        ),
+        get_consolidated_memories_by_user(user_id, limit=5),
     )
     memory_context = format_memory_context(memories, consolidated)
 
-    # Step 2: Get conversation history from cache (short-term context)
+    # Step 3: Read current session history from cache (current session truth)
     conversation_history = get_conversation(user_id)
 
-    # Save user message to cache immediately
-    add_message(user_id, "user", message)
-
-    logger.info(f"Chat: Built context with {len(conversation_history)} history messages, memory={'yes' if memory_context else 'no'}")
-
-    # Step 3: Delegate to Orchestrator Agent
-    final_response = await run_orchestrator(
-        user_id=user_id,
-        message=message,
-        memory_context=memory_context,
-        conversation_history=conversation_history
+    # Step 4: Add user turn to cache (RAM only, with image bytes if any)
+    user_turn_id = add_message(
+        user_id,
+        "user",
+        message,
+        images=images if images else None,
     )
 
-    logger.info(f"Chat: Final response length={len(final_response)}")
+    logger.info(
+        f"Chat: Built context — history={len(conversation_history)} msgs, "
+        f"memory={'yes' if memory_context else 'no'}, "
+        f"session_start={before_iso}"
+    )
 
-    # Step 4: Save assistant response to conversation cache
+    # Step 5: Start a task row + bind ContextVar so orchestrator tool calls get logged
+    task_id = await start_task(user_id, message)
+    current_task_id.set(task_id)
+    _tool_sequence.set(0)
+
+    started_at = time.time()
+    emit_event(
+        "chat.start",
+        task_id=task_id,
+        user_id=user_id,
+        has_images=bool(images),
+    )
+
+    # Step 6: Delegate to Orchestrator Agent
+    status = "completed"
+    final_response = ""
+    iterations = 0
+    try:
+        final_response, iterations = await run_orchestrator(
+            user_id=user_id,
+            message=message,
+            memory_context=memory_context,
+            conversation_history=conversation_history,
+            current_images=images if images else None,
+        )
+    except Exception as e:
+        status = "failed"
+        final_response = f"Đã có lỗi xảy ra: {e}"
+        logger.error(f"Chat: Orchestrator failed for task {task_id}: {e}")
+    finally:
+        await end_task(task_id, status, final_response, iterations)
+        emit_event(
+            "chat.end",
+            task_id=task_id,
+            status=status,
+            duration_ms=int((time.time() - started_at) * 1000),
+        )
+
+    logger.info(f"Chat: Final response length={len(final_response)}, task={task_id}")
+
+    # Step 7: Save assistant response to cache
     add_message(user_id, "assistant", final_response)
 
-    # Step 5: Ingest Agent - store conversation in background (non-blocking)
-    asyncio.create_task(ingest_memory(user_id, message, final_response))
-    logger.info(f"Chat: Ingest task scheduled in background")
+    # Step 8: Background — describe images (replaces bytes with text in cache)
+    if images:
+        asyncio.create_task(_describe_and_replace(user_id, user_turn_id, images, message, task_id))
+
+    # Step 9: Background — classify task type for analytics
+    asyncio.create_task(_classify_and_finalize(task_id, message, final_response))
+    logger.info("Chat: Background tasks scheduled")
 
     return final_response

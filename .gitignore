@@ -5,6 +5,9 @@ service-account.json
 # Database
 memory.db
 
+# Uploaded files
+data/uploads/
+
 # Python
 __pycache__/
 *.py[cod]

@@ -44,10 +44,17 @@ async def init_collection():
         logger.info(f"Qdrant collection already exists: {COLLECTION_NAME}")
 
 
-async def store_document(title: str, content: str, chunk_size: int = 500, overlap: int = 50):
+async def store_document(
+    title: str,
+    content: str,
+    chunk_size: int = 500,
+    overlap: int = 50,
+    file_id: str | None = None,
+):
     """
     Store a document by chunking and embedding it.
     chunk_size and overlap are in characters (approximation for tokens).
+    file_id (optional) links chunks back to the files registry row.
     """
     client = get_qdrant_client()
 
@@ -66,22 +73,44 @@ async def store_document(title: str, content: str, chunk_size: int = 500, overla
     # Prepare points for Qdrant
     points = []
     for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+        payload = {
+            "title": title,
+            "content": chunk,
+            "chunk_index": i,
+        }
+        if file_id:
+            payload["file_id"] = file_id
         points.append(
             models.PointStruct(
                 id=str(uuid.uuid4()),
                 vector=embedding,
-                payload={
-                    "title": title,
-                    "content": chunk,
-                    "chunk_index": i
-                }
+                payload=payload,
             )
         )
 
     # Upsert to Qdrant
     client.upsert(collection_name=COLLECTION_NAME, points=points)
-    logger.info(f"Stored document '{title}' with {len(chunks)} chunks")
+    logger.info(f"Stored document '{title}' with {len(chunks)} chunks (file_id={file_id})")
     return len(chunks)
+
+
+async def delete_chunks_by_file_id(file_id: str) -> None:
+    """Remove all Qdrant points whose payload.file_id matches."""
+    client = get_qdrant_client()
+    client.delete(
+        collection_name=COLLECTION_NAME,
+        points_selector=models.FilterSelector(
+            filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="file_id",
+                        match=models.MatchValue(value=file_id),
+                    )
+                ]
+            )
+        ),
+    )
+    logger.info(f"Deleted Qdrant chunks for file_id={file_id}")
 
 
 async def retrieve_relevant_chunks(query: str, top_k: int = 5) -> list[dict]:

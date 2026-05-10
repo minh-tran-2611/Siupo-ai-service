@@ -1,3 +1,4 @@
+import base64
 import traceback
 from fastapi import APIRouter, HTTPException
 from loguru import logger
@@ -15,12 +16,23 @@ router = APIRouter()
 async def chat_endpoint(request: ChatRequest):
     """
     Main chat endpoint.
-    Receives a user message and returns an AI response.
+    Receives a user message (and optional inline images) and returns an AI response.
     """
-    logger.info(f"Chat endpoint: userId={request.userId}, message={request.message[:50]}...")
+    logger.info(
+        f"Chat endpoint: userId={request.userId}, "
+        f"message={request.message[:50]}..., images={len(request.images)}"
+    )
+
+    # Decode base64 images into raw bytes for the service layer
+    decoded_images: list[dict] = []
+    for img in request.images:
+        try:
+            decoded_images.append({"bytes": base64.b64decode(img.data), "mime": img.mime})
+        except Exception as e:
+            logger.warning(f"Chat endpoint: skipping malformed image: {e}")
 
     try:
-        reply = await chat(request.userId, request.message)
+        reply = await chat(request.userId, request.message, images=decoded_images)
         return ChatResponse(reply=reply)
     except Exception as e:
         logger.error(f"Chat endpoint error: {e}\n{traceback.format_exc()}")
@@ -31,10 +43,10 @@ async def chat_endpoint(request: ChatRequest):
 async def clear_chat_endpoint(request: ClearChatRequest):
     """
     Clear conversation history for a user.
-    Called when user clicks "New Chat" button.
+    Called when user clicks "New Chat" button. Also flushes cache to memories.
     """
     logger.info(f"Clear chat: userId={request.userId}")
-    clear_conversation(request.userId)
+    await clear_conversation(request.userId)
     return {"status": "ok", "message": "Conversation cleared"}
 
 

@@ -1,3 +1,15 @@
+"""
+Consolidation agent — runs every 24h via the scheduler.
+
+Reads RAW conversation messages from the memories table (flushed there from the
+conversation cache on session eviction), extracts structured information, and
+produces multiple consolidated summaries per user. Source rows are deleted on
+success — consolidated_memories becomes the long-term truth.
+
+This agent now does both the extraction and the consolidation that ingest_agent
+used to do per-turn. Per-turn extraction was over-engineered for typical
+restaurant-manager queries (short, transactional).
+"""
 from datetime import datetime
 from google.genai import types
 from loguru import logger
@@ -6,46 +18,45 @@ from app.utils.llm_utils import get_gemini_client, call_llm_with_retry, extract_
 from app.memory.sqlite_memory import (
     get_unconsolidated_memories,
     save_consolidated_memory,
-    delete_memories_by_ids
+    delete_memories_by_ids,
 )
 
 
-CONSOLIDATE_SYSTEM_PROMPT = """You are a memory consolidation agent for a restaurant management system.
-Given a list of memory entries for a single user, your task is to:
-1. Find patterns and recurring themes
-2. Create MULTIPLE consolidated summaries - one for each important entity or topic
-3. PRESERVE specific details like product names, prices, dates, and customer names
+CONSOLIDATE_SYSTEM_PROMPT = """Bạn là agent tổng hợp bộ nhớ cho hệ thống quản lý nhà hàng.
 
-IMPORTANT RULES:
-- Create SEPARATE summaries for important entities (product names, prices, dates, customer names)
-- Group related memories by topic but KEEP specific values
-- Each summary should be actionable and contain concrete information
+Đầu vào: danh sách các tin nhắn raw (User/Assistant) trong khoảng thời gian gần đây của một người dùng.
 
-Output a JSON ARRAY of memory objects. Each object has:
-- summary: A specific summary (1-2 sentences) with concrete details
-- entities: List of important entities mentioned (names, numbers, dates)
-- topics: List of relevant topics from ["product", "order", "policy", "complaint", "banner", "category", "combo", "notification", "user", "general"]
-- importance: "high" for specific entities/numbers, "medium" for patterns, "low" for general info
+Nhiệm vụ:
+1. Tìm các sự kiện, quyết định, sở thích, khiếu nại, thông tin khách hàng/sản phẩm/đơn hàng quan trọng
+2. Tạo NHIỀU summary riêng — mỗi entity / topic quan trọng tạo một summary
+3. GIỮ NGUYÊN số liệu cụ thể: tên sản phẩm, giá, ngày, tên khách, mã đơn
 
-Example output:
+QUY TẮC:
+- BỎ QUA: lời chào, xác nhận đơn giản (ok, vâng), filler ("tốt", "ổn")
+- GIỮ: hành động cụ thể, yêu cầu, phàn nàn, sở thích, danh tính, số liệu
+- Mỗi summary 1-2 câu, có giá trị tham chiếu lại sau
+
+Output là MỘT MẢNG JSON các object, mỗi object có:
+- summary: string — 1-2 câu cụ thể
+- entities: list — tên, số, ngày quan trọng
+- topics: list — chọn từ ["product", "order", "policy", "complaint", "banner", "category", "combo", "notification", "user", "preference", "general"]
+- importance: "high" / "medium" / "low"
+
+Ví dụ output:
 [
-  {"summary": "Khách Nguyễn Văn A thường đặt Phở Bò vào buổi sáng", "entities": ["Nguyễn Văn A", "Phở Bò"], "topics": ["order", "user"], "importance": "high"},
-  {"summary": "Sản phẩm Cơm Gà được thêm với giá 45.000đ ngày 15/03", "entities": ["Cơm Gà", "45000", "15/03"], "topics": ["product"], "importance": "high"},
-  {"summary": "Người dùng thường hỏi về chính sách đổi trả và hoàn tiền", "entities": [], "topics": ["policy"], "importance": "medium"}
+  {"summary": "Khách Nguyễn Văn A thường đặt Phở Bò vào sáng thứ Bảy", "entities": ["Nguyễn Văn A", "Phở Bò"], "topics": ["order", "user"], "importance": "high"},
+  {"summary": "Combo Gia Đình bán 150 phần, combo Lãng Mạn chỉ 12 phần", "entities": ["combo Gia Đình", "150", "combo Lãng Mạn", "12"], "topics": ["combo", "order"], "importance": "high"}
 ]
 
-Output ONLY the JSON array, no other text.
+Chỉ output mảng JSON, không thêm text.
 """
 
 
 async def run_consolidate_agent():
-    """
-    Run the consolidation process for all users with unconsolidated memories.
-    This should be triggered by the scheduler every 24 hours.
+    """Run consolidation across all users with unconsolidated memories.
 
-    NEW BEHAVIOR:
-    - Creates MULTIPLE consolidated summaries (preserving important entities)
-    - DELETES original memories after consolidation (not just marking)
+    Triggered by the scheduler every 24h. Creates multiple consolidated
+    summaries per user and deletes source rows.
     """
     logger.info("Consolidate Agent: Starting consolidation run")
 
@@ -60,52 +71,65 @@ async def run_consolidate_agent():
     for user_id, memories in grouped_memories.items():
         logger.info(f"Consolidate Agent: Processing {len(memories)} memories for user {user_id}")
 
-        # Format memories for LLM
-        memory_text = "Memories to consolidate:\n"
-        memory_ids = []
+        # Build raw conversation text from raw_message rows
+        memory_ids = [m["id"] for m in memories]
+        lines = []
         for m in memories:
-            memory_text += f"- {m['summary']} (entities: {m['entities']}, topics: {m['topics']})\n"
-            memory_ids.append(m['id'])
+            raw = m.get("raw_message") or m.get("summary") or ""
+            if raw.strip():
+                lines.append(raw.strip())
 
-        # Call LLM to consolidate (with retry for rate limiting)
+        if not lines:
+            logger.info(f"Consolidate Agent: No content to consolidate for user {user_id}, skipping")
+            await delete_memories_by_ids(memory_ids)
+            continue
+
+        memory_text = "Tin nhắn cần tổng hợp:\n" + "\n".join(lines)
+
+        # Call LLM to extract + consolidate
         client = get_gemini_client()
-        response = await call_llm_with_retry(
-            lambda: client.aio.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=memory_text,
-                config=types.GenerateContentConfig(
-                    system_instruction=CONSOLIDATE_SYSTEM_PROMPT,
-                    temperature=0.1
+        try:
+            response = await call_llm_with_retry(
+                lambda: client.aio.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=memory_text,
+                    config=types.GenerateContentConfig(
+                        system_instruction=CONSOLIDATE_SYSTEM_PROMPT,
+                        temperature=0.1,
+                    ),
                 )
             )
-        )
-
-        try:
             parsed = extract_json_from_llm(response.text)
             consolidated_list = parsed if isinstance(parsed, list) else [parsed]
+        except Exception as e:
+            logger.error(f"Consolidate Agent: Extraction failed for user {user_id}: {e}")
+            continue
 
-            # Save MULTIPLE consolidated memories
-            saved_count = 0
-            for consolidated_data in consolidated_list:
-                # Skip low importance if there are many summaries
-                if len(consolidated_list) > 10 and consolidated_data.get("importance") == "low":
-                    continue
-
+        # Save consolidated entries (skip "low" importance when many)
+        saved_count = 0
+        for entry in consolidated_list:
+            if len(consolidated_list) > 10 and entry.get("importance") == "low":
+                continue
+            try:
                 await save_consolidated_memory(
                     user_id=user_id,
-                    summary=consolidated_data.get("summary", ""),
-                    entities=consolidated_data.get("entities", []),
-                    topics=consolidated_data.get("topics", []),
-                    period=today
+                    summary=entry.get("summary", ""),
+                    entities=entry.get("entities", []),
+                    topics=entry.get("topics", []),
+                    period=today,
                 )
                 saved_count += 1
+            except Exception as e:
+                logger.error(f"Consolidate Agent: Failed to save entry for user {user_id}: {e}")
 
-            # DELETE source memories (not just mark)
+        # Delete source rows on success
+        try:
             await delete_memories_by_ids(memory_ids)
-
-            logger.info(f"Consolidate Agent: Created {saved_count} summaries from {len(memory_ids)} memories for user {user_id}")
-
+            logger.info(
+                f"Consolidate Agent: User {user_id} — created {saved_count} summaries "
+                f"from {len(memory_ids)} memories"
+            )
         except Exception as e:
-            logger.error(f"Consolidate Agent: Failed to consolidate for user {user_id}: {e}")
+            logger.error(f"Consolidate Agent: Failed to delete source memories for user {user_id}: {e}")
 
     logger.info("Consolidate Agent: Consolidation run completed")

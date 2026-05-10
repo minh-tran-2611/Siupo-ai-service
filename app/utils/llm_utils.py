@@ -5,10 +5,14 @@ Centralizes duplicated code that previously existed across all agent files.
 import os
 import json
 import re
+import time
 import asyncio
 import random
 from google import genai
 from loguru import logger
+
+from app.events.agent_event_bus import emit as emit_event
+from app.events.edge_map import tool_to_edges, caller_agent_id
 
 _gemini_client: genai.Client | None = None
 
@@ -44,15 +48,38 @@ async def execute_tool(tool_functions: dict, name: str, args: dict, label: str =
     """Execute a tool by name, returning a JSON-serialized result string."""
     prefix = f"[{label}] " if label else ""
     logger.info(f"{prefix}Executing tool: {name} with args: {args}")
+    agent_id = caller_agent_id(label)
+    edges = tool_to_edges(name, label)
+    started = time.time()
+    ok = True
+    emit_event(
+        "tool.call.start",
+        agent_id=agent_id,
+        tool_name=name,
+        edges=edges,
+        label=label,
+    )
     try:
         func = tool_functions.get(name)
         if not func:
+            ok = False
             return json.dumps({"error": f"Unknown tool: {name}"})
         result = await func(**args)
         return json.dumps(result, ensure_ascii=False, default=str)
     except Exception as e:
+        ok = False
         logger.error(f"{prefix}Tool execution error [{name}]: {e}")
         return json.dumps({"error": str(e)})
+    finally:
+        emit_event(
+            "tool.call.end",
+            agent_id=agent_id,
+            tool_name=name,
+            edges=edges,
+            label=label,
+            ok=ok,
+            duration_ms=int((time.time() - started) * 1000),
+        )
 
 
 def extract_json_from_llm(text: str):
