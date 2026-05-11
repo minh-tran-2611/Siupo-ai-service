@@ -1,56 +1,45 @@
 """
-Analytics Agent — Business intelligence, insights, and recommendations.
+Analytics Agent — Trả lời câu hỏi kinh doanh với phán đoán riêng.
 
-This agent receives a task description from the Orchestrator, fetches
-analytics data via tools, analyzes it, and provides insights with
-actionable recommendations.
+Agent này được gọi bởi Orchestrator. Nó tự quyết độ sâu phù hợp:
+- Câu đơn giản → gọi 1-2 tool, trả lời gọn.
+- Câu phân tích sâu → đa tool, suy luận, đưa khuyến nghị.
+- Khi phù hợp, đề xuất lưu báo cáo. Nếu user xác nhận, gọi create_analytics_report.
 
-It runs in isolation with its own system prompt and tool set.
+Không có pipeline cứng — model tự dùng judgment.
 """
 from google.genai import types
 from loguru import logger
 
-from app.utils.prompt_builder import get_analytics_data_prompt, get_analytics_strategy_prompt
+from app.utils.prompt_builder import get_analytics_prompt
 from app.utils.llm_utils import get_gemini_client, call_llm_with_retry, execute_tool
 from app.tools.tool_declarations import ANALYTICS_DECLARATIONS
 from app.tools.tool_registry import get_tool_functions, ANALYTICS_TOOL_NAMES
 
-# Tool functions for this agent
 _tool_functions = get_tool_functions(ANALYTICS_TOOL_NAMES)
 
 
 async def run_analytics_agent(task: str) -> str:
     """
-    Execute a business analytics task using a 2-phase pipeline:
-      Phase 1 (Data Analyst): collect data via tools, calculate metrics, summarize
-      Phase 2 (Strategy Advisor): analyze root causes, forecast, produce prioritized actions
-
-    Args:
-        task: Complete analytics task description from the orchestrator.
-
-    Returns:
-        Combined report: structured data summary + strategic action plan.
+    Run a single declarative tool-call loop. The model decides how many tools
+    to call and how to format the answer based on the task.
     """
     logger.info(f"AnalyticsAgent: Received task: {task[:100]}...")
 
     client = get_gemini_client()
+    contents = [types.Content(role="user", parts=[types.Part.from_text(text=task)])]
 
-    # ── Phase 1: Data Collection & Calculation ──────────────────────────────
-    contents = [
-        types.Content(role="user", parts=[types.Part.from_text(text=task)])
-    ]
-
-    data_config = types.GenerateContentConfig(
-        system_instruction=get_analytics_data_prompt(),
-        temperature=0.3,
-        tools=ANALYTICS_DECLARATIONS
+    config = types.GenerateContentConfig(
+        system_instruction=get_analytics_prompt(),
+        temperature=0.4,
+        tools=ANALYTICS_DECLARATIONS,
     )
 
     response = await call_llm_with_retry(
         lambda: client.aio.models.generate_content(
             model="gemini-2.5-flash",
             contents=contents,
-            config=data_config
+            config=config,
         )
     )
 
@@ -63,7 +52,7 @@ async def run_analytics_agent(task: str) -> str:
         function_calls = []
         for candidate in response.candidates:
             for part in candidate.content.parts:
-                if hasattr(part, 'function_call') and part.function_call:
+                if hasattr(part, "function_call") and part.function_call:
                     function_calls.append(part.function_call)
 
         if not function_calls:
@@ -73,14 +62,14 @@ async def run_analytics_agent(task: str) -> str:
 
         function_responses = []
         for fc in function_calls:
-            result = await execute_tool(_tool_functions, fc.name, dict(fc.args), label="AnalyticsAgent[P1]")
+            result = await execute_tool(_tool_functions, fc.name, dict(fc.args), label="AnalyticsAgent")
             function_responses.append(
                 types.Part.from_function_response(
                     name=fc.name,
-                    response={"result": result}
+                    response={"result": result},
                 )
             )
-            logger.info(f"AnalyticsAgent[P1]: Tool {fc.name} → {result[:200]}...")
+            logger.info(f"AnalyticsAgent: Tool {fc.name} → {result[:200]}...")
 
         contents.append(types.Content(role="user", parts=function_responses))
 
@@ -88,34 +77,11 @@ async def run_analytics_agent(task: str) -> str:
             lambda: client.aio.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=contents,
-                config=data_config
+                config=config,
             )
         )
 
-    data_report = response.text if response.text else ""
-    logger.info(f"AnalyticsAgent[P1]: Data report done in {iteration} iterations ({len(data_report)} chars)")
+    final_text = response.text if response.text else ""
+    logger.info(f"AnalyticsAgent: Completed in {iteration} iterations ({len(final_text)} chars)")
 
-    # ── Phase 2: Strategy Synthesis (no tools, pure reasoning) ──────────────
-    strategy_input = (
-        f"[BÁO CÁO SỐ LIỆU]\n{data_report}\n\n"
-        f"[YÊU CẦU GỐC]\n{task}"
-    )
-
-    strategy_response = await call_llm_with_retry(
-        lambda: client.aio.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=strategy_input,
-            config=types.GenerateContentConfig(
-                system_instruction=get_analytics_strategy_prompt(),
-                temperature=0.4
-            )
-        )
-    )
-
-    strategy = strategy_response.text if strategy_response.text else ""
-    logger.info(f"AnalyticsAgent[P2]: Strategy done ({len(strategy)} chars)")
-
-    if not data_report and not strategy:
-        return "Không thể hoàn thành phân tích."
-
-    return f"{data_report}\n\n{strategy}" if strategy else data_report
+    return final_text if final_text else "Không thể hoàn thành phân tích."

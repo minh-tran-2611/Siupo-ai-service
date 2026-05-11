@@ -41,6 +41,7 @@ from app.tools.tag_tools import (
 from app.tools.review_tools import (
     get_reviews_by_order, get_review_by_order_item
 )
+from app.tools.report_tools import create_analytics_report
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -115,6 +116,8 @@ ALL_TOOL_FUNCTIONS = {
     # Review
     "get_reviews_by_order": get_reviews_by_order,
     "get_review_by_order_item": get_review_by_order_item,
+    # Report (analytics output)
+    "create_analytics_report": create_analytics_report,
 }
 
 
@@ -165,6 +168,8 @@ ANALYTICS_TOOL_NAMES = [
     "get_all_vouchers_admin", "get_voucher_by_id",
     # Review data (for sentiment / quality analysis)
     "get_order_reviews", "get_reviews_by_order", "get_review_by_order_item",
+    # Report output — only called after user confirms
+    "create_analytics_report",
     # Utility
     "search_internet",
 ]

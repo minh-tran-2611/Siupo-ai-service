@@ -763,6 +763,34 @@ ANALYTICS_DECLARATIONS = [
                 required=["query"]
             )
         ),
+
+        # ── Report output ──
+        types.FunctionDeclaration(
+            name="create_analytics_report",
+            description=(
+                "Lưu báo cáo phân tích dạng Markdown vào File Manager và Qdrant. "
+                "CHỈ gọi sau khi user đã xác nhận muốn tạo báo cáo file. "
+                "Không gọi cho câu hỏi đơn giản hay khi user chưa đồng ý."
+            ),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "title": types.Schema(
+                        type=types.Type.STRING,
+                        description="Tiêu đề báo cáo, ví dụ 'Phân tích doanh thu tháng 5/2026'"
+                    ),
+                    "content": types.Schema(
+                        type=types.Type.STRING,
+                        description="Toàn văn báo cáo dạng Markdown"
+                    ),
+                    "topic": types.Schema(
+                        type=types.Type.STRING,
+                        description="Chủ đề ngắn để đặt tên file (ví dụ 'doanh_thu_thang_5'). Có thể để trống."
+                    ),
+                },
+                required=["title", "content"]
+            )
+        ),
     ])
 ]
 
