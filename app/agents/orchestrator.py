@@ -22,6 +22,7 @@ from app.tools.search_tools import search_internet
 from app.agents.management_agent import run_management_agent
 from app.agents.analytics_agent import run_analytics_agent
 from app.rag.retriever import retrieve_relevant_chunks
+from app.tools.gmail_tools import send_email_notification
 from app.memory.task_log import log_tool_call
 from app.events.agent_event_bus import emit as emit_event
 from app.events.edge_map import tool_to_edges
@@ -50,6 +51,7 @@ _orchestrator_tools = {
     "call_analytics_agent": run_analytics_agent,
     "search_internet": search_internet,
     "search_documents": _search_documents,
+    "send_email_notification": send_email_notification,
 }
 
 

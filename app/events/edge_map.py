@@ -52,6 +52,8 @@ def tool_to_edges(tool_name: str, label: str = "") -> list[tuple[str, str]]:
         return [(caller, "google")]
     if tool_name == "search_documents":
         return [(caller, "qdrant")]
+    if tool_name == "send_email_notification":
+        return [("orchestrator", "gmail")]
 
     # Sub-agent tools: light up <agent>>tools_<agent> bundle edge
     if tool_name in MANAGEMENT_TOOL_NAMES and caller == "management":

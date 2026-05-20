@@ -865,5 +865,29 @@ ORCHESTRATOR_DECLARATIONS = [
                 required=["query"]
             )
         ),
+        types.FunctionDeclaration(
+            name="send_email_notification",
+            description="""Send an email notification to admin.
+
+        CALL THIS WHEN:
+        - Admin explicitly asks to send an email/report via email
+        - You need to notify admin about something critical (many canceled orders, revenue anomaly)
+        - Admin asks to email a summary or report
+
+        DO NOT call this for routine responses — only when email delivery is specifically requested or truly urgent.
+
+        The email will be sent from the Siupo AI Assistant email account.
+        If to_email is not provided, it defaults to the configured admin email.""",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "to_email": types.Schema(type=types.Type.STRING, description="Recipient email (optional, defaults to admin)"),
+                    "subject": types.Schema(type=types.Type.STRING, description="Email subject line"),
+                    "body": types.Schema(type=types.Type.STRING, description="Email body content (plain text)"),
+                    "priority": types.Schema(type=types.Type.STRING, description="'normal' or 'urgent' (default: normal)")
+                },
+                required=["subject", "body"]
+            )
+        ),
     ])
 ]
