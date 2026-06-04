@@ -14,6 +14,7 @@ from app.controller.agents_controller import router as agents_router
 from app.controller.files_controller import router as files_router
 from app.controller.zalo_controller import router as zalo_router
 from app.memory.sqlite_memory import init_db
+from app.memory.conversation_cache import flush_all_sessions
 from app.rag.retriever import init_collection
 from app.rag.embedder import init_embedder
 from app.scheduler.consolidate_scheduler import start_scheduler, stop_scheduler
@@ -56,6 +57,13 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down AI Service...")
+    # Flush active in-RAM sessions to long-term storage before exit so they
+    # aren't lost on a normal shutdown (Ctrl+C / graceful reload).
+    try:
+        flushed = await flush_all_sessions()
+        logger.info(f"Flushed {flushed} active session(s) on shutdown")
+    except Exception as e:
+        logger.error(f"Failed to flush sessions on shutdown: {e}")
     stop_scheduler()
     logger.info("AI Service shut down")
 

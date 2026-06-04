@@ -25,10 +25,13 @@ from app.memory.conversation_cache import (
     get_conversation,
     add_message,
     get_session_start,
+    get_session_memory,
+    set_session_memory,
     replace_images_with_description,
 )
 from app.memory.task_log import start_task, end_task, finalize_classification
 from app.events.agent_event_bus import emit as emit_event
+from app.tools.report_tools import created_files
 
 
 def format_memory_context(memories: list[dict], consolidated: list[dict]) -> str:
@@ -44,10 +47,10 @@ def format_memory_context(memories: list[dict], consolidated: list[dict]) -> str
         for m in consolidated[:5]:
             parts.append(f"- {m['summary']}")
 
-    # Recent raw memories from previous sessions (raw_message is the truth)
+    # Raw memories from previous sessions (raw_message is the truth) — all of them
     if memories:
         parts.append("\nHội thoại trước đây:")
-        for m in memories[:10]:
+        for m in memories:
             text = m.get("raw_message") or m.get("summary") or ""
             if text:
                 parts.append(f"- {text}")
@@ -88,7 +91,7 @@ async def _describe_and_replace(user_id: str, turn_id: int, images: list[dict], 
         emit_event("worker.end", worker_id="image_describer", task_id=task_id)
 
 
-async def chat(user_id: str, message: str, images: list[dict] | None = None) -> str:
+async def chat(user_id: str, message: str, images: list[dict] | None = None) -> dict:
     """
     Main chat function — coordinates memory, orchestrator, task log, and caching.
 
@@ -96,6 +99,9 @@ async def chat(user_id: str, message: str, images: list[dict] | None = None) -> 
         user_id: User identifier
         message: User text message
         images: Optional list of {bytes, mime} dicts for inline image attachments
+
+    Returns:
+        Dict with 'reply' (str) and 'files' (list of file metadata dicts).
     """
     images = images or []
     logger.info(
@@ -106,19 +112,38 @@ async def chat(user_id: str, message: str, images: list[dict] | None = None) -> 
     # Step 1: Determine session boundary BEFORE adding the new message
     # (so memories filter excludes anything written in this session by past flushes)
     session_start = get_session_start(user_id)
-    before_iso = session_start.isoformat(sep=" ") if session_start else None
 
-    # Step 2: Fetch long-term memories — previous sessions only (no overlap with cache)
-    memories, consolidated = await asyncio.gather(
-        get_memories_by_user(
-            user_id,
-            limit=10,
-            before=before_iso,
-            only_unconsolidated=True,
-        ),
-        get_consolidated_memories_by_user(user_id, limit=5),
-    )
-    memory_context = format_memory_context(memories, consolidated)
+    # Step 2: Long-term memory — fetch ONCE per session, then reuse from cache.
+    # consolidated + memories are ~static within a session (session_start is fixed
+    # and nothing flushes mid-session), so we only hit Turso on the first turn and
+    # store the formatted block on the session for the rest of the conversation.
+    memory_context = get_session_memory(user_id)
+    if memory_context is None:
+        before_iso = session_start.isoformat(sep=" ") if session_start else None
+        memories, consolidated = await asyncio.gather(
+            get_memories_by_user(
+                user_id,
+                limit=None,  # all unconsolidated rows from previous sessions
+                before=before_iso,
+                only_unconsolidated=True,
+            ),
+            get_consolidated_memories_by_user(user_id, limit=5),
+        )
+        memory_context = format_memory_context(memories, consolidated)
+
+        # Log the exact memory block injected into the prompt for this session
+        logger.info(
+            f"Chat: Memory fetched for user {user_id} — "
+            f"raw={len(memories)}, consolidated={len(consolidated)}"
+        )
+        if memory_context:
+            logger.info(f"Chat: Memory context passed to prompt:\n{memory_context}")
+        else:
+            logger.info("Chat: Memory context passed to prompt: <empty>")
+    else:
+        logger.info(
+            f"Chat: Reusing cached memory context for user {user_id} (no Turso fetch)"
+        )
 
     # Step 3: Read current session history from cache (current session truth)
     conversation_history = get_conversation(user_id)
@@ -131,10 +156,14 @@ async def chat(user_id: str, message: str, images: list[dict] | None = None) -> 
         images=images if images else None,
     )
 
+    # Persist the long-term memory block on the (now-existing) session so the next
+    # turn reuses it from RAM instead of re-querying Turso.
+    set_session_memory(user_id, memory_context)
+
     logger.info(
         f"Chat: Built context — history={len(conversation_history)} msgs, "
         f"memory={'yes' if memory_context else 'no'}, "
-        f"session_start={before_iso}"
+        f"session_start={session_start}"
     )
 
     # Step 5: Start a task row + bind ContextVar so orchestrator tool calls get logged
@@ -150,7 +179,10 @@ async def chat(user_id: str, message: str, images: list[dict] | None = None) -> 
         has_images=bool(images),
     )
 
-    # Step 6: Delegate to Orchestrator Agent
+    # Step 6: Reset created_files tracker for this turn
+    created_files.set([])
+
+    # Step 7: Delegate to Orchestrator Agent
     status = "completed"
     final_response = ""
     iterations = 0
@@ -177,6 +209,13 @@ async def chat(user_id: str, message: str, images: list[dict] | None = None) -> 
 
     logger.info(f"Chat: Final response length={len(final_response)}, task={task_id}")
 
+    # Capture any files created during this turn
+    turn_files = []
+    try:
+        turn_files = created_files.get()
+    except LookupError:
+        pass
+
     # Step 7: Save assistant response to cache
     add_message(user_id, "assistant", final_response)
 
@@ -188,4 +227,4 @@ async def chat(user_id: str, message: str, images: list[dict] | None = None) -> 
     asyncio.create_task(_classify_and_finalize(task_id, message, final_response))
     logger.info("Chat: Background tasks scheduled")
 
-    return final_response
+    return {"reply": final_response, "files": turn_files}

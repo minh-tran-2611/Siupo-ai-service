@@ -1,14 +1,3 @@
-"""
-Orchestrator Agent — Main entry point that routes user requests to sub-agents.
-
-Architecture:
-- Receives user message + memory context from chat_service
-- Uses LLM function calling to decide: management_agent / analytics_agent / direct response
-- Delegates to the appropriate sub-agent
-- Returns final response to user
-
-Sub-agents are exposed as meta-tools via Gemini function calling.
-"""
 import json
 import time
 from contextvars import ContextVar

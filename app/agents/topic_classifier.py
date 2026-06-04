@@ -1,10 +1,3 @@
-"""
-Topic Classifier — small LLM that runs after a chat turn finishes to decide:
-1. Is this user message a "task" worth showing in the Task Pipeline?
-2. What topic does it belong to?
-
-Output is used by chat_service to call task_log.finalize_classification(...).
-"""
 from google.genai import types
 from loguru import logger
 

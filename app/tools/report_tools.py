@@ -9,6 +9,7 @@ import re
 import uuid
 import asyncio
 import unicodedata
+from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 from loguru import logger
@@ -18,6 +19,10 @@ from app.rag.retriever import store_document
 
 
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "data/uploads"))
+
+# Collects file metadata created during a single chat turn.
+# Reset by chat_service before each orchestrator run.
+created_files: ContextVar[list] = ContextVar("created_files", default=[])
 
 
 def _slugify(text: str, max_length: int = 60) -> str:
@@ -89,9 +94,25 @@ async def create_analytics_report(title: str, content: str, topic: str = "") -> 
     except Exception as e:
         logger.exception(f"ReportTool: Qdrant indexing failed for {file_id}: {e}")
 
-    return {
+    result = {
         "file_id": file_id,
         "filename": filename,
         "chunk_count": chunk_count,
         "message": f"Đã lưu báo cáo '{title}' vào File Manager. Anh có thể xem trong mục quản lý file.",
     }
+
+    # Collect file info for the chat response
+    try:
+        files = created_files.get()
+    except LookupError:
+        files = []
+        created_files.set(files)
+    files.append({
+        "file_id": file_id,
+        "filename": filename,
+        "extension": "md",
+        "mime_type": "text/markdown",
+        "size_bytes": len(body_bytes),
+    })
+
+    return result

@@ -12,6 +12,25 @@ BE_BASE_URL = os.getenv("BE_BASE_URL", "http://host.docker.internal:8080")
 TIMEOUT = httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0)
 
 
+def _to_datetime(value: str, end_of_day: bool = False) -> str:
+    """Normalize a date/datetime string for the BE's LocalDateTime params.
+
+    The analytics endpoints expect ISO DATE_TIME (e.g. 2026-06-01T00:00:00).
+    If only a date is provided (no time component), default the time so values
+    like "2026-06-01" are accepted instead of failing to parse:
+      - start dates default to 00:00:00 (start of day)
+      - end dates default to 23:59:59 (end of day) so the whole day is included
+    """
+    if not value:
+        return value
+    v = value.strip()
+    # Already has a time component (date and time separated by 'T' or space)
+    if "T" in v or " " in v:
+        return v
+    # Date-only -> append start/end of day
+    return f"{v}T23:59:59" if end_of_day else f"{v}T00:00:00"
+
+
 async def get_analytics_summary(period: str = "THIS_MONTH", start_date: str = None, end_date: str = None) -> dict:
     """
     Get comprehensive analytics summary with all metrics in one call.
@@ -38,9 +57,9 @@ async def get_analytics_summary(period: str = "THIS_MONTH", start_date: str = No
     
     params = {"period": period}
     if start_date:
-        params["startDate"] = start_date
+        params["startDate"] = _to_datetime(start_date)
     if end_date:
-        params["endDate"] = end_date
+        params["endDate"] = _to_datetime(end_date, end_of_day=True)
     
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await client.get(
@@ -80,9 +99,9 @@ async def get_revenue_analytics(period: str = "THIS_MONTH", start_date: str = No
     
     params = {"period": period}
     if start_date:
-        params["startDate"] = start_date
+        params["startDate"] = _to_datetime(start_date)
     if end_date:
-        params["endDate"] = end_date
+        params["endDate"] = _to_datetime(end_date, end_of_day=True)
     
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await client.get(
@@ -122,9 +141,9 @@ async def get_order_analytics(period: str = "THIS_MONTH", start_date: str = None
     
     params = {"period": period}
     if start_date:
-        params["startDate"] = start_date
+        params["startDate"] = _to_datetime(start_date)
     if end_date:
-        params["endDate"] = end_date
+        params["endDate"] = _to_datetime(end_date, end_of_day=True)
     
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await client.get(
@@ -161,9 +180,9 @@ async def get_product_analytics(limit: int = 10, period: str = "THIS_MONTH", sta
     
     params = {"limit": limit, "period": period}
     if start_date:
-        params["startDate"] = start_date
+        params["startDate"] = _to_datetime(start_date)
     if end_date:
-        params["endDate"] = end_date
+        params["endDate"] = _to_datetime(end_date, end_of_day=True)
     
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await client.get(
@@ -194,9 +213,9 @@ async def get_top_selling_products(limit: int = 10, period: str = "THIS_MONTH", 
     
     params = {"limit": limit, "period": period}
     if start_date:
-        params["startDate"] = start_date
+        params["startDate"] = _to_datetime(start_date)
     if end_date:
-        params["endDate"] = end_date
+        params["endDate"] = _to_datetime(end_date, end_of_day=True)
     
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await client.get(
@@ -231,9 +250,9 @@ async def get_customer_analytics(period: str = "THIS_MONTH", start_date: str = N
     
     params = {"period": period}
     if start_date:
-        params["startDate"] = start_date
+        params["startDate"] = _to_datetime(start_date)
     if end_date:
-        params["endDate"] = end_date
+        params["endDate"] = _to_datetime(end_date, end_of_day=True)
     
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await client.get(
@@ -273,9 +292,9 @@ async def get_booking_analytics(period: str = "THIS_MONTH", start_date: str = No
     
     params = {"period": period}
     if start_date:
-        params["startDate"] = start_date
+        params["startDate"] = _to_datetime(start_date)
     if end_date:
-        params["endDate"] = end_date
+        params["endDate"] = _to_datetime(end_date, end_of_day=True)
     
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await client.get(

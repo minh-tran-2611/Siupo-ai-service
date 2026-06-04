@@ -1,13 +1,3 @@
-"""
-Image describer — single-purpose agent that turns image bytes into a Vietnamese
-text caption for storage in the conversation cache.
-
-Used by chat_service as a fire-and-forget background call after each turn that
-contains images. The caption replaces the image bytes in the cache so:
-- bytes are GC'd after the describer finishes (no long-lived RAM)
-- subsequent turns in the same session retain visual context as text
-- on cache eviction, only text reaches the memories table (no bytes ever in DB)
-"""
 from google.genai import types
 from loguru import logger
 

@@ -26,6 +26,7 @@ from loguru import logger
 #   "messages": [{role, content, images?, turn_id?}],
 #   "last_access": datetime,
 #   "session_start": datetime,
+#   "memory_context": str,   # long-term memory block, fetched once per session
 # }}
 _cache: dict[str, dict] = {}
 
@@ -145,6 +146,31 @@ def get_session_start(user_id: str, session_id: Optional[str] = None) -> Optiona
     return sess["session_start"] if sess else None
 
 
+def get_session_memory(user_id: str, session_id: Optional[str] = None) -> Optional[str]:
+    """Return the long-term memory block cached for this session.
+
+    Returns None when there is no active session OR the block hasn't been set yet
+    (e.g. the first turn). A cached-but-empty block is returned as "" — distinct
+    from None — so callers can skip re-fetching even when the user has no memories.
+    """
+    sid = get_session_id(user_id, session_id)
+    sess = _cache.get(sid)
+    if sess is None:
+        return None
+    return sess.get("memory_context")
+
+
+def set_session_memory(user_id: str, memory_context: str, session_id: Optional[str] = None) -> None:
+    """Store the long-term memory block on the session for reuse across turns.
+
+    No-op if the session does not exist yet (call after add_message creates it).
+    """
+    sid = get_session_id(user_id, session_id)
+    sess = _cache.get(sid)
+    if sess is not None:
+        sess["memory_context"] = memory_context
+
+
 def get_conversation(user_id: str, session_id: Optional[str] = None) -> list[dict]:
     """Get conversation history for a session.
 
@@ -232,6 +258,28 @@ def replace_images_with_description(
             return True
     logger.warning(f"ConversationCache: turn_id {turn_id} not found in session {sid}")
     return False
+
+
+async def flush_all_sessions() -> int:
+    """Flush every active session to long-term storage, ignoring TTL.
+
+    Used on application shutdown so in-RAM sessions are not lost. Each session's
+    messages are persisted via the flush callback, then the cache is emptied.
+    Returns the number of sessions flushed.
+    """
+    if not _cache:
+        return 0
+    sids = list(_cache.keys())
+    flushed = 0
+    for sid in sids:
+        session = _cache.pop(sid, None)
+        if session is None:
+            continue
+        await _flush_session(sid, session)
+        flushed += 1
+    if flushed:
+        logger.info(f"ConversationCache: Flushed {flushed} session(s) on shutdown")
+    return flushed
 
 
 async def clear_conversation(user_id: str, session_id: Optional[str] = None):

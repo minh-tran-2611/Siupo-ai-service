@@ -1,13 +1,3 @@
-"""
-Analytics Agent — Trả lời câu hỏi kinh doanh với phán đoán riêng.
-
-Agent này được gọi bởi Orchestrator. Nó tự quyết độ sâu phù hợp:
-- Câu đơn giản → gọi 1-2 tool, trả lời gọn.
-- Câu phân tích sâu → đa tool, suy luận, đưa khuyến nghị.
-- Khi phù hợp, đề xuất lưu báo cáo. Nếu user xác nhận, gọi create_analytics_report.
-
-Không có pipeline cứng — model tự dùng judgment.
-"""
 from google.genai import types
 from loguru import logger
 

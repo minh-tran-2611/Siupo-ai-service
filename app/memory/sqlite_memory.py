@@ -168,13 +168,14 @@ async def bulk_save_memories(user_id: str, raw_messages: list[str]) -> int:
 
 async def get_memories_by_user(
     user_id: str,
-    limit: int = 20,
+    limit: int | None = 20,
     before: str | None = None,
     only_unconsolidated: bool = False
 ) -> list[dict]:
     """Get recent memories for a user.
 
     Args:
+        limit: Max rows to return. Pass None to fetch ALL matching rows (no LIMIT).
         before: ISO timestamp string. Only return rows with created_at < before.
                 Used to exclude current-session rows already covered by cache.
         only_unconsolidated: If True, filter to consolidated = 0 only.
@@ -188,8 +189,10 @@ async def get_memories_by_user(
             if before is not None:
                 sql += " AND created_at < ?"
                 params.append(before)
-            sql += " ORDER BY created_at DESC LIMIT ?"
-            params.append(limit)
+            sql += " ORDER BY created_at DESC"
+            if limit is not None:
+                sql += " LIMIT ?"
+                params.append(limit)
             result = client.execute(sql, params)
             return [
                 {

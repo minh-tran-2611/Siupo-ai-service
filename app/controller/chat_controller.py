@@ -32,8 +32,8 @@ async def chat_endpoint(request: ChatRequest):
             logger.warning(f"Chat endpoint: skipping malformed image: {e}")
 
     try:
-        reply = await chat(request.userId, request.message, images=decoded_images)
-        return ChatResponse(reply=reply)
+        result = await chat(request.userId, request.message, images=decoded_images)
+        return ChatResponse(reply=result["reply"], files=result.get("files", []))
     except Exception as e:
         logger.error(f"Chat endpoint error: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -10,6 +10,7 @@ from loguru import logger
 
 from app.memory.task_log import get_recent_tasks, get_task_detail
 from app.events.agent_event_bus import get_bus
+from app.scheduler.consolidate_scheduler import trigger_consolidate_now
 
 router = APIRouter()
 
@@ -49,6 +50,20 @@ async def get_task(task_id: str):
         raise
     except Exception as e:
         logger.error(f"get_task error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/agents/consolidate/run")
+async def run_consolidate_manual():
+    """Manually trigger a consolidation run (the 'Consolidate' node button).
+
+    Runs inline and returns when done so the UI can show a definitive result.
+    """
+    try:
+        await trigger_consolidate_now()
+        return {"status": "ok", "message": "Consolidate hoàn tất"}
+    except Exception as e:
+        logger.error(f"run_consolidate_manual error: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

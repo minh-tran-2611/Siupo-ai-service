@@ -36,6 +36,15 @@ async def _consolidate_with_emit():
         emit_event("scheduler.fire", job_id="consolidate_agent_job", phase="end")
 
 
+async def trigger_consolidate_now():
+    """Run consolidation immediately (manual trigger from the UI).
+
+    Reuses the scheduled-job wrapper so it emits the same telemetry events
+    (the orchestration diagram lights the consolidate node exactly like a cron run).
+    """
+    await _consolidate_with_emit()
+
+
 async def _cache_cleanup_with_emit():
     """Cache cleanup job wrapper — emits scheduler + worker events.
 

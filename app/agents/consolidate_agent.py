@@ -1,15 +1,3 @@
-"""
-Consolidation agent — runs every 24h via the scheduler.
-
-Reads RAW conversation messages from the memories table (flushed there from the
-conversation cache on session eviction), extracts structured information, and
-produces multiple consolidated summaries per user. Source rows are deleted on
-success — consolidated_memories becomes the long-term truth.
-
-This agent now does both the extraction and the consolidation that ingest_agent
-used to do per-turn. Per-turn extraction was over-engineered for typical
-restaurant-manager queries (short, transactional).
-"""
 from datetime import datetime
 from google.genai import types
 from loguru import logger

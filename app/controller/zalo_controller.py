@@ -76,7 +76,8 @@ async def _process_zalo_message(event: ZaloWebhookEvent):
             # Show typing indicator while processing
             await send_chat_action(chat_id, "typing")
 
-            reply = await chat(user_id, message.text)
+            result = await chat(user_id, message.text)
+            reply = result["reply"] if isinstance(result, dict) else result
             await send_text_message(chat_id, reply)
 
         # ── Handle image messages ─────────────────────────────────────
@@ -90,7 +91,8 @@ async def _process_zalo_message(event: ZaloWebhookEvent):
                     images.append(img_data)
 
             text = message.caption or "Hãy mô tả và phân tích hình ảnh này."
-            reply = await chat(user_id, text, images=images)
+            result = await chat(user_id, text, images=images)
+            reply = result["reply"] if isinstance(result, dict) else result
             await send_text_message(chat_id, reply)
 
         # ── Handle sticker messages ───────────────────────────────────

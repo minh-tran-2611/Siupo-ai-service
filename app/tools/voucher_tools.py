@@ -140,38 +140,42 @@ async def update_voucher(
     usage_limit_per_user: int = None,
     is_public: bool = None,
 ) -> dict:
-    """Update an existing voucher. Requires authentication."""
+    """Update an existing voucher. Requires authentication.
+
+    The BE update overwrites every field, so this tool first reads the current
+    voucher and merges the provided arguments on top of it. Any field left as
+    None keeps its existing value. Only pass the fields you want to change.
+    """
     logger.info(f"Tool: update_voucher({voucher_id})")
 
     await ensure_authenticated()
 
-    data = {}
-    if code:
-        data["code"] = code
-    if name:
-        data["name"] = name
-    if type:
-        data["type"] = type
-    if discount_value is not None:
-        data["discountValue"] = discount_value
-    if start_date:
-        data["startDate"] = start_date
-    if end_date:
-        data["endDate"] = end_date
-    if description:
-        data["description"] = description
-    if min_order_value is not None:
-        data["minOrderValue"] = min_order_value
-    if max_discount_amount is not None:
-        data["maxDiscountAmount"] = max_discount_amount
-    if usage_limit is not None:
-        data["usageLimit"] = usage_limit
-    if usage_limit_per_user is not None:
-        data["usageLimitPerUser"] = usage_limit_per_user
-    if is_public is not None:
-        data["isPublic"] = is_public
-
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        # Read the current voucher so unspecified fields keep their values
+        current_resp = await client.post(
+            f"{BE_BASE_URL}/api/vouchers/admin/{voucher_id}",
+            headers=get_auth_headers()
+        )
+        current_resp.raise_for_status()
+        current = current_resp.json().get("data") or {}
+
+        # Merge: provided value wins, otherwise fall back to the existing value
+        data = {
+            "code": code if code is not None else current.get("code"),
+            "name": name if name is not None else current.get("name"),
+            "description": description if description is not None else current.get("description"),
+            "type": type if type is not None else current.get("type"),
+            "discountValue": discount_value if discount_value is not None else current.get("discountValue"),
+            "minOrderValue": min_order_value if min_order_value is not None else current.get("minOrderValue"),
+            "maxDiscountAmount": max_discount_amount if max_discount_amount is not None else current.get("maxDiscountAmount"),
+            "usageLimit": usage_limit if usage_limit is not None else current.get("usageLimit"),
+            "usageLimitPerUser": usage_limit_per_user if usage_limit_per_user is not None else current.get("usageLimitPerUser"),
+            "startDate": start_date if start_date is not None else current.get("startDate"),
+            "endDate": end_date if end_date is not None else current.get("endDate"),
+            "status": current.get("status"),
+            "isPublic": is_public if is_public is not None else current.get("isPublic"),
+        }
+
         response = await client.put(
             f"{BE_BASE_URL}/api/vouchers/{voucher_id}",
             json=data,

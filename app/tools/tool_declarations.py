@@ -364,12 +364,12 @@ MANAGEMENT_DECLARATIONS = [
         ),
         types.FunctionDeclaration(
             name="update_voucher",
-            description="Update an existing voucher. Resolve voucher_id via get_all_vouchers_admin if needed.",
+            description="Update an existing voucher. Resolve voucher_id via get_all_vouchers_admin if needed. Only pass the fields you want to change; the tool reads the current voucher and keeps unspecified fields unchanged.",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
                     "voucher_id": types.Schema(type=types.Type.INTEGER, description="Voucher ID"),
-                    "code": types.Schema(type=types.Type.STRING, description="New code"),
+                    "code": types.Schema(type=types.Type.STRING, description="New code (optional, only if changing it)"),
                     "name": types.Schema(type=types.Type.STRING, description="New name"),
                     "type": types.Schema(type=types.Type.STRING, description="New type"),
                     "discount_value": types.Schema(type=types.Type.NUMBER, description="New discount value"),

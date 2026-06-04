@@ -1,12 +1,3 @@
-"""
-Management Agent — Handles restaurant CRUD operations.
-
-This agent receives a task description from the Orchestrator and executes
-it using restaurant management tools (products, categories, combos, banners,
-notifications, users).
-
-It runs in isolation with its own system prompt and tool set.
-"""
 from google.genai import types
 from loguru import logger
 
