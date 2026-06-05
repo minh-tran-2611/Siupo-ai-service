@@ -131,15 +131,12 @@ async def chat(user_id: str, message: str, images: list[dict] | None = None) -> 
         )
         memory_context = format_memory_context(memories, consolidated)
 
-        # Log the exact memory block injected into the prompt for this session
+        # Counts only — the actual block is logged per-turn just before the
+        # orchestrator call (see "Memory context fed to prompt" below).
         logger.info(
-            f"Chat: Memory fetched for user {user_id} — "
+            f"Chat: Memory fetched from Turso for user {user_id} — "
             f"raw={len(memories)}, consolidated={len(consolidated)}"
         )
-        if memory_context:
-            logger.info(f"Chat: Memory context passed to prompt:\n{memory_context}")
-        else:
-            logger.info("Chat: Memory context passed to prompt: <empty>")
     else:
         logger.info(
             f"Chat: Reusing cached memory context for user {user_id} (no Turso fetch)"
@@ -181,6 +178,15 @@ async def chat(user_id: str, message: str, images: list[dict] | None = None) -> 
 
     # Step 6: Reset created_files tracker for this turn
     created_files.set([])
+
+    # Log the exact long-term memory block fed into the prompt for THIS turn
+    # (runs on every turn, including cache hits, so we always see what was gathered)
+    if memory_context:
+        logger.info(
+            f"Chat: Memory context fed to prompt for user {user_id}:\n{memory_context}"
+        )
+    else:
+        logger.info(f"Chat: Memory context fed to prompt for user {user_id}: <empty>")
 
     # Step 7: Delegate to Orchestrator Agent
     status = "completed"
