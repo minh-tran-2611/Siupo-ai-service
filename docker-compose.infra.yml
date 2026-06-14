@@ -1,0 +1,35 @@
+# Stateful services chạy trên 1 VM Compute Engine (e2-small).
+# Redis (cho BE) + Qdrant (cho AI service RAG). Cả 2 cần ổ đĩa nên không hợp Cloud Run.
+#
+# Trên VM:  docker compose -f docker-compose.infra.yml up -d
+# Cloud Run kết nối tới VM qua internal IP (cùng VPC) — xem DEPLOY-GCP.md.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: siupo-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: siupo-qdrant
+    ports:
+      - "6333:6333"   # REST/HTTP
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant-data:/qdrant/storage
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  qdrant-data:

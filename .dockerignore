@@ -1,0 +1,26 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Secrets — KHÔNG đưa vào image. Dùng Secret Manager / Cloud Run env.
+.env
+.env.*
+service-account.json
+
+# Runtime data (ephemeral, không bake vào image)
+logs/
+data/
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
