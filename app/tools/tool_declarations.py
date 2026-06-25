@@ -866,6 +866,25 @@ ORCHESTRATOR_DECLARATIONS = [
             )
         ),
         types.FunctionDeclaration(
+            name="send_zalo_notification",
+            description="""Send a proactive Zalo message to the admin.
+
+        CALL THIS WHEN:
+        - Admin explicitly asks to send a Zalo message
+        - A scheduled daily review finds important market information worth alerting
+        - You need to push a short, urgent alert to admin's phone
+
+        Keep the message concise — Zalo is a mobile channel.
+        DO NOT call for routine responses in normal chat.""",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "message": types.Schema(type=types.Type.STRING, description="Message text to send")
+                },
+                required=["message"]
+            )
+        ),
+        types.FunctionDeclaration(
             name="send_email_notification",
             description="""Send an email notification to admin.
 
@@ -885,6 +904,49 @@ ORCHESTRATOR_DECLARATIONS = [
                     "subject": types.Schema(type=types.Type.STRING, description="Email subject line"),
                     "body": types.Schema(type=types.Type.STRING, description="Email body content (plain text)"),
                     "priority": types.Schema(type=types.Type.STRING, description="'normal' or 'urgent' (default: normal)")
+                },
+                required=["subject", "body"]
+            )
+        ),
+    ])
+]
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# DAILY REVIEW — Scheduled market intelligence review
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+DAILY_REVIEW_DECLARATIONS = [
+    types.Tool(function_declarations=[
+        types.FunctionDeclaration(
+            name="search_documents",
+            description="Search internal knowledge base (RAG) for today's market intelligence.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"query": types.Schema(type=types.Type.STRING, description="Search query")},
+                required=["query"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="send_zalo_notification",
+            description="Send a short alert to admin via Zalo (mobile). Use for high-importance findings.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "message": types.Schema(type=types.Type.STRING, description="Short message for mobile")
+                },
+                required=["message"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="send_email_notification",
+            description="Send a detailed email to admin. Use for medium-to-high importance findings.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "subject": types.Schema(type=types.Type.STRING, description="Email subject"),
+                    "body": types.Schema(type=types.Type.STRING, description="Email body"),
+                    "priority": types.Schema(type=types.Type.STRING, description="'normal' or 'urgent'")
                 },
                 required=["subject", "body"]
             )

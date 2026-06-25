@@ -6,15 +6,17 @@ from loguru import logger
 
 from app.utils.prompt_builder import get_orchestrator_prompt
 from app.utils.llm_utils import get_gemini_client, call_llm_with_retry
-from app.tools.tool_declarations import ORCHESTRATOR_DECLARATIONS
+from app.tools.tool_declarations import ORCHESTRATOR_DECLARATIONS, DAILY_REVIEW_DECLARATIONS
 from app.tools.search_tools import search_internet
 from app.agents.management_agent import run_management_agent
 from app.agents.analytics_agent import run_analytics_agent
 from app.rag.retriever import retrieve_relevant_chunks
 from app.tools.gmail_tools import send_email_notification
+from app.tools.zalo_notify_tools import send_zalo_notification
 from app.memory.task_log import log_tool_call
 from app.events.agent_event_bus import emit as emit_event
 from app.events.edge_map import tool_to_edges
+from app.utils.prompt_builder import get_daily_review_prompt
 
 # Per-request task id used to attribute orchestrator-level tool calls.
 current_task_id: ContextVar[str | None] = ContextVar("current_task_id", default=None)
@@ -40,6 +42,13 @@ _orchestrator_tools = {
     "call_analytics_agent": run_analytics_agent,
     "search_internet": search_internet,
     "search_documents": _search_documents,
+    "send_email_notification": send_email_notification,
+    "send_zalo_notification": send_zalo_notification,
+}
+
+_daily_review_tools = {
+    "search_documents": _search_documents,
+    "send_zalo_notification": send_zalo_notification,
     "send_email_notification": send_email_notification,
 }
 
@@ -251,3 +260,85 @@ async def run_orchestrator(user_id: str, message: str, memory_context: str,
     logger.info(f"Orchestrator: Completed in {iteration} iterations, response: {len(final_response)} chars")
 
     return final_response, iteration
+
+
+async def run_daily_review_orchestrator() -> None:
+    """Scheduled daily review — retrieves market intel from Qdrant and sends notifications if warranted.
+
+    Runs autonomously (no user, no conversation history). Uses a focused tool set:
+    search_documents, send_zalo_notification, send_email_notification.
+    """
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+    logger.info(f"Daily Review Orchestrator: Starting review for {today}")
+
+    contents = [
+        types.Content(
+            role="user",
+            parts=[types.Part.from_text(
+                text=f"Thực hiện kiểm tra thị trường hàng ngày cho ngày {today}."
+            )]
+        )
+    ]
+
+    llm_config = types.GenerateContentConfig(
+        system_instruction=get_daily_review_prompt(),
+        temperature=0.4,
+        tools=DAILY_REVIEW_DECLARATIONS,
+    )
+
+    client = get_gemini_client()
+    response = await call_llm_with_retry(
+        lambda: client.aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=contents,
+            config=llm_config,
+        )
+    )
+
+    max_iterations = 5
+    iteration = 0
+
+    while iteration < max_iterations:
+        iteration += 1
+
+        function_calls = []
+        for candidate in response.candidates:
+            for part in candidate.content.parts:
+                if hasattr(part, "function_call") and part.function_call:
+                    function_calls.append(part.function_call)
+
+        if not function_calls:
+            break
+
+        contents.append(response.candidates[0].content)
+
+        function_responses = []
+        for fc in function_calls:
+            func = _daily_review_tools.get(fc.name)
+            if not func:
+                result = json.dumps({"error": f"Unknown tool: {fc.name}"})
+            else:
+                try:
+                    result = await func(**dict(fc.args))
+                    if not isinstance(result, str):
+                        result = json.dumps(result, ensure_ascii=False, default=str)
+                except Exception as e:
+                    logger.error(f"Daily Review: Tool {fc.name} error: {e}")
+                    result = json.dumps({"error": str(e)})
+            logger.info(f"Daily Review: Tool {fc.name} completed")
+            function_responses.append(
+                types.Part.from_function_response(name=fc.name, response={"result": result})
+            )
+
+        contents.append(types.Content(role="user", parts=function_responses))
+
+        response = await call_llm_with_retry(
+            lambda: client.aio.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=contents,
+                config=llm_config,
+            )
+        )
+
+    logger.info(f"Daily Review Orchestrator: Completed in {iteration} iterations")

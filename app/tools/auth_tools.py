@@ -44,15 +44,15 @@ async def ensure_authenticated() -> str:
     token = get_token()
     if token:
         return token
-    
+
     # Auto-login with admin credentials
     logger.info("Token missing or expired, auto-login with admin...")
-    result = await login()
-    
+    await login()
+
     token = get_token()
     if not token:
         raise Exception("Failed to authenticate: no token received")
-    
+
     return token
 
 
@@ -62,6 +62,26 @@ def get_auth_headers() -> dict:
     if token:
         return {"Authorization": f"Bearer {token}"}
     return {}
+
+
+async def make_request(client: httpx.AsyncClient, method: str, url: str, **kwargs) -> httpx.Response:
+    """
+    Make an authenticated HTTP request with automatic re-login on 401.
+    Retries once after clearing the cached token and re-authenticating.
+    """
+    token = await ensure_authenticated()
+    headers = {**kwargs.pop("headers", {}), "Authorization": f"Bearer {token}"}
+
+    response = await getattr(client, method)(url, headers=headers, **kwargs)
+
+    if response.status_code == 401:
+        logger.warning("Got 401 — token expired, re-authenticating and retrying...")
+        clear_token()
+        token = await ensure_authenticated()
+        headers["Authorization"] = f"Bearer {token}"
+        response = await getattr(client, method)(url, headers=headers, **kwargs)
+
+    return response
 
 
 async def logout() -> dict:

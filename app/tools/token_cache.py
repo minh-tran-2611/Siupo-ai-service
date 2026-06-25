@@ -16,8 +16,8 @@ _token_cache = {
     "expires_at": None
 }
 
-# Token validity duration (assume 1 hour, refresh 5 mins before expiry)
-TOKEN_VALIDITY_MINUTES = 55
+# Token validity: BE JWT expires in 15 min (900000ms), refresh 2 min early
+TOKEN_VALIDITY_MINUTES = 13
 
 
 def get_token() -> str | None:

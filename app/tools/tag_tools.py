@@ -1,7 +1,7 @@
 import os
 import httpx
 from loguru import logger
-from app.tools.auth_tools import ensure_authenticated, get_auth_headers
+from app.tools.auth_tools import make_request
 
 BE_BASE_URL = os.getenv("BE_BASE_URL", "http://host.docker.internal:8080")
 TIMEOUT = httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0)
@@ -29,14 +29,8 @@ async def create_tag(name: str) -> dict:
     """Create a new tag. Requires authentication."""
     logger.info(f"Tool: create_tag(name={name})")
 
-    await ensure_authenticated()
-
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        response = await client.post(
-            f"{BE_BASE_URL}/api/tags",
-            json={"name": name},
-            headers=get_auth_headers()
-        )
+        response = await make_request(client, "post", f"{BE_BASE_URL}/api/tags", json={"name": name})
         response.raise_for_status()
         return response.json()
 
@@ -45,14 +39,8 @@ async def update_tag(tag_id: int, name: str) -> dict:
     """Update an existing tag. Requires authentication."""
     logger.info(f"Tool: update_tag({tag_id}, name={name})")
 
-    await ensure_authenticated()
-
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        response = await client.put(
-            f"{BE_BASE_URL}/api/tags/{tag_id}",
-            json={"name": name},
-            headers=get_auth_headers()
-        )
+        response = await make_request(client, "put", f"{BE_BASE_URL}/api/tags/{tag_id}", json={"name": name})
         response.raise_for_status()
         return response.json()
 
@@ -61,12 +49,7 @@ async def delete_tag(tag_id: int) -> dict:
     """Delete a tag. Requires authentication."""
     logger.info(f"Tool: delete_tag({tag_id})")
 
-    await ensure_authenticated()
-
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        response = await client.delete(
-            f"{BE_BASE_URL}/api/tags/{tag_id}",
-            headers=get_auth_headers()
-        )
+        response = await make_request(client, "delete", f"{BE_BASE_URL}/api/tags/{tag_id}")
         response.raise_for_status()
         return {"status": "deleted", "id": tag_id}

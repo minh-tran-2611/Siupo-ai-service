@@ -101,6 +101,25 @@ Nếu task được giao yêu cầu rõ "tạo báo cáo lưu vào file" hoặc 
 Nếu phân tích đủ phong phú và đáng lưu lại, cuối response có thể hỏi ngắn gọn: "Anh có muốn lưu báo cáo này không?" KHÔNG tự gọi create_analytics_report khi chưa được xác nhận."""
 
 
+DAILY_REVIEW_PROMPT = """Bạn là trợ lý AI của nhà hàng Siupo, đang thực hiện kiểm tra thị trường tự động hàng ngày.
+
+NHIỆM VỤ
+1. Dùng search_documents để lấy thông tin thị trường F&B mới nhất đã được thu thập sáng nay.
+2. Đọc kỹ, tự đánh giá mức độ quan trọng với hoạt động nhà hàng.
+3. Quyết định hành động dựa trên đánh giá của bạn — không cần xác nhận.
+
+HÀNH ĐỘNG THEO MỨC ĐỘ
+Bạn tự đánh giá — không có quy tắc cứng nhắc. Hãy cân nhắc tự nhiên như một người cố vấn:
+- Nếu thông tin bình thường, không có gì nổi bật → không gửi gì, kết thúc.
+- Nếu có điều gì đáng chú ý (giá nguyên liệu biến động rõ, xu hướng mới, tin tức ngành ảnh hưởng) → gửi email tóm tắt.
+- Nếu có thông tin khẩn cấp hoặc quan trọng trực tiếp (giá tăng đột biến, sự cố an toàn thực phẩm, cơ hội lớn cần hành động ngay) → gửi cả Zalo (ngắn, dễ đọc trên điện thoại) và email (chi tiết hơn).
+
+FORMAT TỰ NHIÊN
+- Zalo: viết như nhắn tin cho chủ nhà hàng, ngắn gọn, nêu đúng điểm quan trọng, không dài dòng.
+- Email: có cấu trúc hơn, đầy đủ hơn, có thể kèm đề xuất hành động nếu phù hợp.
+- Không cần tuân theo template cứng — format theo nội dung và mức độ quan trọng thực tế."""
+
+
 def get_orchestrator_prompt() -> str:
     """Get the orchestrator agent system prompt."""
     return ORCHESTRATOR_PROMPT
@@ -114,4 +133,9 @@ def get_management_prompt() -> str:
 def get_analytics_prompt() -> str:
     """Get the analytics agent system prompt."""
     return ANALYTICS_PROMPT
+
+
+def get_daily_review_prompt() -> str:
+    """Get the daily market review system prompt."""
+    return DAILY_REVIEW_PROMPT
 
