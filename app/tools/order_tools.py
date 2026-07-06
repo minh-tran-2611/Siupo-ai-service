@@ -1,7 +1,7 @@
 import os
 import httpx
 from loguru import logger
-from app.tools.auth_tools import ensure_authenticated, get_auth_headers
+from app.tools.auth_tools import make_request
 
 BE_BASE_URL = os.getenv("BE_BASE_URL", "http://host.docker.internal:8080")
 TIMEOUT = httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0)
@@ -17,18 +17,12 @@ async def get_all_orders_admin(status: str = None, page: int = 0, size: int = 20
     """
     logger.info(f"Tool: get_all_orders_admin(status={status}, page={page}, size={size})")
 
-    await ensure_authenticated()
-
     params = {"page": page, "size": size}
     if status:
         params["status"] = status
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        response = await client.get(
-            f"{BE_BASE_URL}/api/orders/admin",
-            params=params,
-            headers=get_auth_headers()
-        )
+        response = await make_request(client, "get", f"{BE_BASE_URL}/api/orders/admin", params=params)
         response.raise_for_status()
         return response.json()
 
@@ -37,13 +31,8 @@ async def get_order_detail_admin(order_id: int) -> dict:
     """Get full order details by id (admin). Requires authentication."""
     logger.info(f"Tool: get_order_detail_admin({order_id})")
 
-    await ensure_authenticated()
-
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        response = await client.get(
-            f"{BE_BASE_URL}/api/orders/admin/{order_id}",
-            headers=get_auth_headers()
-        )
+        response = await make_request(client, "get", f"{BE_BASE_URL}/api/orders/admin/{order_id}")
         response.raise_for_status()
         return response.json()
 
@@ -55,14 +44,8 @@ async def update_order_status(order_id: int, status: str) -> dict:
     """
     logger.info(f"Tool: update_order_status({order_id}, status={status})")
 
-    await ensure_authenticated()
-
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        response = await client.patch(
-            f"{BE_BASE_URL}/api/orders/admin/{order_id}/status",
-            params={"status": status},
-            headers=get_auth_headers()
-        )
+        response = await make_request(client, "patch", f"{BE_BASE_URL}/api/orders/admin/{order_id}/status", params={"status": status})
         response.raise_for_status()
         return response.json()
 
@@ -71,13 +54,8 @@ async def delete_order(order_id: int) -> dict:
     """Delete an order (admin). Requires authentication."""
     logger.info(f"Tool: delete_order({order_id})")
 
-    await ensure_authenticated()
-
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        response = await client.delete(
-            f"{BE_BASE_URL}/api/orders/admin/{order_id}",
-            headers=get_auth_headers()
-        )
+        response = await make_request(client, "delete", f"{BE_BASE_URL}/api/orders/admin/{order_id}")
         response.raise_for_status()
         return {"status": "deleted", "id": order_id}
 
@@ -86,12 +64,7 @@ async def get_order_reviews(order_id: int) -> dict:
     """Get all reviews for a specific order. Requires authentication."""
     logger.info(f"Tool: get_order_reviews({order_id})")
 
-    await ensure_authenticated()
-
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        response = await client.get(
-            f"{BE_BASE_URL}/api/orders/{order_id}/reviews",
-            headers=get_auth_headers()
-        )
+        response = await make_request(client, "get", f"{BE_BASE_URL}/api/orders/{order_id}/reviews")
         response.raise_for_status()
         return response.json()

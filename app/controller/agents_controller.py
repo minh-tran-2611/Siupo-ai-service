@@ -6,13 +6,26 @@ import json
 import traceback
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from loguru import logger
 
 from app.memory.task_log import get_recent_tasks, get_task_detail
 from app.events.agent_event_bus import get_bus
-from app.scheduler.consolidate_scheduler import trigger_consolidate_now
+from app.service.crawl_config import get_crawl_urls, set_crawl_urls
+from app.scheduler.consolidate_scheduler import (
+    trigger_consolidate_now,
+    trigger_market_intel_now,
+    trigger_daily_review_now,
+    trigger_crawl_now,
+    crawl_status,
+    scheduler,
+)
 
 router = APIRouter()
+
+
+class CrawlConfigRequest(BaseModel):
+    urls: list[str] = Field(default_factory=list, description="Target URLs to crawl")
 
 _KEEPALIVE_SECONDS = 15
 
@@ -64,6 +77,69 @@ async def run_consolidate_manual():
         return {"status": "ok", "message": "Consolidate hoàn tất"}
     except Exception as e:
         logger.error(f"run_consolidate_manual error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/agents/market-intel/run")
+async def run_market_intel_manual():
+    """Manually trigger a market intel crawl (for testing)."""
+    try:
+        await trigger_market_intel_now()
+        return {"status": "ok", "message": "Market intel crawl hoàn tất"}
+    except Exception as e:
+        logger.error(f"run_market_intel_manual error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/agents/daily-review/run")
+async def run_daily_review_manual():
+    """Manually trigger a daily market review (for testing)."""
+    try:
+        await trigger_daily_review_now()
+        return {"status": "ok", "message": "Daily review hoàn tất"}
+    except Exception as e:
+        logger.error(f"run_daily_review_manual error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/agents/crawl/run")
+async def run_crawl_manual():
+    """Manually trigger a crawl run immediately (bypass schedule).
+
+    Returns 409 if a crawl is already in progress.
+    """
+    if crawl_status.get("status") == "running":
+        raise HTTPException(status_code=409, detail="Crawl đang chạy, vui lòng đợi hoàn tất.")
+    try:
+        asyncio.ensure_future(trigger_crawl_now())
+        return {"status": "triggered", "message": "Crawl đã được trigger thủ công."}
+    except Exception as e:
+        logger.error(f"run_crawl_manual error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/agents/crawl/status")
+async def get_crawl_status():
+    """Return last crawl run metadata for the FE Crawl Agent card."""
+    job = scheduler.get_job("crawl_agent_job")
+    next_run = job.next_run_time.isoformat() if job and job.next_run_time else None
+    return {**crawl_status, "next_run": next_run}
+
+
+@router.get("/agents/crawl/config")
+async def get_crawl_config():
+    """Return the list of target URLs the crawl agent will fetch."""
+    return {"urls": get_crawl_urls()}
+
+
+@router.put("/agents/crawl/config")
+async def update_crawl_config(body: CrawlConfigRequest):
+    """Persist a new list of target URLs for the crawl agent."""
+    try:
+        saved = set_crawl_urls(body.urls)
+        return {"status": "ok", "urls": saved, "message": f"Đã lưu {len(saved)} URLs"}
+    except Exception as e:
+        logger.error(f"update_crawl_config error: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
