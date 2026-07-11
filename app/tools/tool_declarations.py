@@ -544,7 +544,7 @@ MANAGEMENT_DECLARATIONS = [
         # ── Utility ──
         types.FunctionDeclaration(
             name="search_internet",
-            description="Search the internet for external information or images.",
+            description="Search the internet for external information/images, or fetch and summarize a public URL.",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={"query": types.Schema(type=types.Type.STRING, description="Search query")},
@@ -565,7 +565,9 @@ ANALYTICS_DECLARATIONS = [
             name="get_analytics_summary",
             description="""Get comprehensive analytics summary (revenue, orders, products, customers, bookings, insights).
         RECOMMENDED for complete business overview.
-        PERIOD: TODAY, YESTERDAY, LAST_7_DAYS, LAST_30_DAYS, THIS_MONTH (default), LAST_MONTH, THIS_YEAR, CUSTOM.""",
+        PERIOD: TODAY, YESTERDAY, LAST_7_DAYS, LAST_30_DAYS, THIS_MONTH (default), LAST_MONTH, THIS_YEAR, CUSTOM.
+        Use period=CUSTOM with explicit start_date/end_date when the user asks for a specific calendar date/month/year.
+        For revenue of the requested period, read revenue.totalRevenue, not monthRevenue/weekRevenue/yearRevenue.""",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
@@ -577,7 +579,12 @@ ANALYTICS_DECLARATIONS = [
         ),
         types.FunctionDeclaration(
             name="get_revenue_analytics",
-            description="Detailed revenue: total, today, yesterday, growth rate, average order value, trend.",
+            description=(
+                "Detailed revenue. For the requested period, the authoritative value is totalRevenue. "
+                "Use period=CUSTOM with explicit start_date/end_date for specific calendar ranges, "
+                "for example June 2026 = 2026-06-01 to 2026-06-30. "
+                "Do not answer a custom month using monthRevenue/weekRevenue/yearRevenue."
+            ),
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
@@ -756,7 +763,7 @@ ANALYTICS_DECLARATIONS = [
 
         types.FunctionDeclaration(
             name="search_internet",
-            description="Search internet for benchmarks or industry data.",
+            description="Search internet for benchmarks or industry data, or fetch and summarize a public URL.",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={"query": types.Schema(type=types.Type.STRING, description="Search query")},
@@ -849,7 +856,7 @@ ORCHESTRATOR_DECLARATIONS = [
         ),
         types.FunctionDeclaration(
             name="search_internet",
-            description="Search the internet for external information.",
+            description="Search the internet for external information, or fetch and summarize a public URL.",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={"query": types.Schema(type=types.Type.STRING, description="Search query")},
@@ -862,6 +869,21 @@ ORCHESTRATOR_DECLARATIONS = [
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={"query": types.Schema(type=types.Type.STRING, description="Document search query")},
+                required=["query"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="remember",
+            description=(
+                "Retrieve past conversation memory for the current user. "
+                "Use this when the user asks about something they said before, past facts, history, memory, "
+                "or previous instructions. Do not use it just to acknowledge or store new information "
+                "the user has just provided. This tool scans all raw memory and scans consolidated memory "
+                "in thirds from newest to oldest."
+            ),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={"query": types.Schema(type=types.Type.STRING, description="Memory search query")},
                 required=["query"]
             )
         ),

@@ -23,9 +23,6 @@ libsql-client==0.3.0
 # Scheduler
 apscheduler==3.10.4
 
-# Search
-google-search-results==2.4.2
-
 # Utils
 python-dotenv==1.0.1
 pydantic==2.9.2

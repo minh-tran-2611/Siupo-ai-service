@@ -1,5 +1,7 @@
 import json
+import re
 import time
+import unicodedata
 from contextvars import ContextVar
 from google.genai import types
 from loguru import logger
@@ -8,6 +10,7 @@ from app.utils.prompt_builder import get_orchestrator_prompt
 from app.utils.llm_utils import get_gemini_client, call_llm_with_retry
 from app.tools.tool_declarations import ORCHESTRATOR_DECLARATIONS, DAILY_REVIEW_DECLARATIONS
 from app.tools.search_tools import search_internet
+from app.tools.memory_tools import remember
 from app.agents.management_agent import run_management_agent
 from app.agents.analytics_agent import run_analytics_agent
 from app.rag.retriever import retrieve_relevant_chunks
@@ -20,6 +23,7 @@ from app.utils.prompt_builder import get_daily_review_prompt
 
 # Per-request task id used to attribute orchestrator-level tool calls.
 current_task_id: ContextVar[str | None] = ContextVar("current_task_id", default=None)
+current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 # Sequence counter per request — incremented for each tool call within a task.
 _tool_sequence: ContextVar[int] = ContextVar("_tool_sequence", default=0)
 
@@ -36,12 +40,21 @@ async def _search_documents(query: str) -> dict:
     return {"results": results}
 
 
+async def _remember(query: str) -> dict:
+    """Retrieve long-term memory for the current user."""
+    user_id = current_user_id.get()
+    if not user_id:
+        return {"error": "No current user_id available for remember tool"}
+    return await remember(user_id=user_id, query=query)
+
+
 # Meta-tool functions — maps tool names to actual execution
 _orchestrator_tools = {
     "call_management_agent": run_management_agent,
     "call_analytics_agent": run_analytics_agent,
     "search_internet": search_internet,
     "search_documents": _search_documents,
+    "remember": _remember,
     "send_email_notification": send_email_notification,
     "send_zalo_notification": send_zalo_notification,
 }
@@ -57,6 +70,51 @@ _META_TO_AGENT = {
     "call_management_agent": "management",
     "call_analytics_agent": "analytics",
 }
+
+_URL_RE = re.compile(r"https?://[^\s<>()\"']+")
+
+
+def _normalize_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text.lower())
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def _is_new_memory_note(message: str) -> bool:
+    """True when user is providing new info to remember, not asking past memory."""
+    text = _normalize_text(message)
+    save_markers = ("ghi nho", "nho giup", "hay nho", "luu y", "luu lai", "nho rang")
+    past_markers = (
+        "lan truoc", "truoc do", "hoi truoc", "hom truoc", "da tung noi",
+        "toi da noi", "qua khu", "lich su", "memory",
+    )
+    return any(marker in text for marker in save_markers) and not any(
+        marker in text for marker in past_markers
+    )
+
+
+def _orchestrator_declarations_for_message(message: str):
+    if not _is_new_memory_note(message):
+        return ORCHESTRATOR_DECLARATIONS
+
+    filtered_tools = []
+    for tool in ORCHESTRATOR_DECLARATIONS:
+        declarations = [
+            declaration
+            for declaration in (tool.function_declarations or [])
+            if declaration.name != "remember"
+        ]
+        filtered_tools.append(types.Tool(function_declarations=declarations))
+    logger.info("Orchestrator: remember tool disabled for new-memory note")
+    return filtered_tools
+
+
+def _extract_urls(text: str) -> list[str]:
+    urls = []
+    for match in _URL_RE.findall(text):
+        url = match.rstrip(".,;:!?)]}")
+        if url not in urls:
+            urls.append(url)
+    return urls[:3]
 
 
 async def _execute_tool(name: str, args: dict) -> str:
@@ -154,19 +212,7 @@ def _build_parts_from_message(msg: dict) -> list:
 async def run_orchestrator(user_id: str, message: str, memory_context: str,
                            conversation_history: list,
                            current_images: list | None = None) -> tuple[str, int]:
-    """
-    Main orchestrator — routes user requests to the appropriate sub-agent.
 
-    Args:
-        user_id: User identifier
-        message: Current user message text
-        memory_context: Formatted long-term memory string
-        conversation_history: List of previous messages [{role, content, images?}]
-        current_images: Optional list of {bytes, mime, hint} for the current turn
-
-    Returns:
-        Tuple (final response text, number of LLM iterations).
-    """
     logger.info(f"Orchestrator: Processing request from user {user_id}")
 
     # Build contents with conversation history
@@ -184,6 +230,18 @@ async def run_orchestrator(user_id: str, message: str, memory_context: str,
         role = "model" if msg["role"] == "assistant" else "user"
         contents.append(types.Content(role=role, parts=_build_parts_from_message(msg)))
 
+    for url in _extract_urls(message):
+        result = await _execute_tool("search_internet", {"query": url})
+        contents.append(types.Content(role="user", parts=[types.Part.from_text(
+            text=(
+                "[URL_FETCH_CONTEXT]\n"
+                f"URL user provided: {url}\n"
+                f"Fetch result: {result}\n\n"
+                "Use this direct fetch result when answering. Do not claim the URL is internal, "
+                "private, or unavailable if this result contains page content."
+            )
+        )]))
+
     # Add current user message — text + any inline images
     current_parts: list = [types.Part.from_text(text=message)]
     for img in current_images or []:
@@ -197,7 +255,7 @@ async def run_orchestrator(user_id: str, message: str, memory_context: str,
     llm_config = types.GenerateContentConfig(
         system_instruction=get_orchestrator_prompt(),
         temperature=0.7,
-        tools=ORCHESTRATOR_DECLARATIONS
+        tools=_orchestrator_declarations_for_message(message)
     )
 
     client = get_gemini_client()

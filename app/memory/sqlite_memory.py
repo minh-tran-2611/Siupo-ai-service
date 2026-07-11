@@ -170,7 +170,8 @@ async def get_memories_by_user(
     user_id: str,
     limit: int | None = 20,
     before: str | None = None,
-    only_unconsolidated: bool = False
+    only_unconsolidated: bool = False,
+    offset: int = 0,
 ) -> list[dict]:
     """Get recent memories for a user.
 
@@ -193,6 +194,9 @@ async def get_memories_by_user(
             if limit is not None:
                 sql += " LIMIT ?"
                 params.append(limit)
+                if offset:
+                    sql += " OFFSET ?"
+                    params.append(offset)
             result = client.execute(sql, params)
             return [
                 {
@@ -207,15 +211,47 @@ async def get_memories_by_user(
     return await asyncio.to_thread(_sync)
 
 
-async def get_consolidated_memories_by_user(user_id: str, limit: int = 10) -> list[dict]:
+async def count_memories_by_user(
+    user_id: str,
+    before: str | None = None,
+    only_unconsolidated: bool = False,
+) -> int:
+    """Count memory rows for a user."""
+    def _sync():
+        with _db_client() as client:
+            sql = "SELECT COUNT(*) FROM memories WHERE user_id = ?"
+            params: list = [user_id]
+            if only_unconsolidated:
+                sql += " AND consolidated = 0"
+            if before is not None:
+                sql += " AND created_at < ?"
+                params.append(before)
+            result = client.execute(sql, params)
+            return int(result.rows[0][0])
+
+    return await asyncio.to_thread(_sync)
+
+
+async def get_consolidated_memories_by_user(
+    user_id: str,
+    limit: int | None = 10,
+    offset: int = 0,
+) -> list[dict]:
     """Get consolidated memories for a user."""
     def _sync():
         with _db_client() as client:
-            result = client.execute(
+            sql = (
                 "SELECT id, summary, entities, topics, period, created_at "
-                "FROM consolidated_memories WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
-                [user_id, limit]
+                "FROM consolidated_memories WHERE user_id = ? ORDER BY created_at DESC"
             )
+            params: list = [user_id]
+            if limit is not None:
+                sql += " LIMIT ?"
+                params.append(limit)
+                if offset:
+                    sql += " OFFSET ?"
+                    params.append(offset)
+            result = client.execute(sql, params)
             return [
                 {
                     "id": row[0], "summary": row[1],
@@ -225,6 +261,19 @@ async def get_consolidated_memories_by_user(user_id: str, limit: int = 10) -> li
                 }
                 for row in result.rows
             ]
+
+    return await asyncio.to_thread(_sync)
+
+
+async def count_consolidated_memories_by_user(user_id: str) -> int:
+    """Count consolidated memory rows for a user."""
+    def _sync():
+        with _db_client() as client:
+            result = client.execute(
+                "SELECT COUNT(*) FROM consolidated_memories WHERE user_id = ?",
+                [user_id],
+            )
+            return int(result.rows[0][0])
 
     return await asyncio.to_thread(_sync)
 

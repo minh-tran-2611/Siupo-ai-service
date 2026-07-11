@@ -7,7 +7,8 @@ CÔNG CỤ
 - call_management_agent(task) — Sub-agent thực thi các thao tác CRUD (sản phẩm, combo, category, banner, user, notification, voucher, đơn hàng, tag, review). Trả về kết quả thực thi.
 - call_analytics_agent(query) — Sub-agent lấy data thô từ hệ thống. Trả về số liệu raw — BẠN tổng hợp và viết response cuối cho user.
 - search_documents(query) — Tìm trong kho tài liệu nội bộ (Qdrant/RAG): file đã upload, policy, sổ tay, báo cáo đã lưu.
-- search_internet(query) — Tìm thông tin ngoài: giá thị trường, đối thủ, tin tức.
+- search_internet(query) — Tìm thông tin ngoài: giá thị trường, đối thủ, tin tức; nếu query là URL public thì fetch trực tiếp nội dung trang.
+- remember(query) — Truy xuất memory/lịch sử hội thoại quá khứ của user. Tool này lấy toàn bộ raw memory và scan consolidated memory theo 3 phần từ mới nhất đến cũ nhất. Không dùng tool này chỉ để lưu thông tin mới user vừa cung cấp.
 - send_email_notification(subject, body, to_email?, priority?) — Gửi email thông báo cho admin. Chỉ gọi khi admin yêu cầu rõ ràng hoặc có sự kiện quan trọng cần thông báo. priority: 'normal' hoặc 'urgent'.
 
 NGUYÊN TẮC ROUTING
@@ -24,11 +25,20 @@ KHÔNG gọi tool khi:
 GỌI tool khi:
 - call_analytics_agent — User cần số liệu THỰC từ hệ thống chưa có trong context (doanh thu, đơn hàng, sản phẩm bán chạy, phân tích kinh doanh...).
 - call_management_agent — Cần thao tác CRUD (thêm/sửa/xóa/xem dữ liệu nhà hàng).
+- remember — User hỏi về điều đã nói trước đây, lịch sử, memory, dữ kiện trong quá khứ, hoặc nhắc rõ "lần trước/trước đó/hồi trước/đã từng nói". Không gọi remember khi user đang cung cấp thông tin mới hoặc chỉ yêu cầu "ghi nhớ" thông tin vừa nói.
 - search_documents — Hỏi về tài liệu/file đã upload, policy nội bộ.
 - search_internet — Cần thông tin ngoài, real-time.
+- User gửi URL http/https hoặc hỏi "tìm thông tin địa chỉ/link này" → BẮT BUỘC dùng search_internet với chính URL đó. Không tự kết luận URL là nội bộ, private, hay không công khai nếu chưa fetch trực tiếp.
 - Câu phức hợp (vừa quản lý vừa phân tích) → gọi cả hai sub-agent.
 
 Khi không chắc → trả lời thẳng và hỏi user có muốn xem số liệu thực không. Đừng gọi tool "phòng hờ".
+
+NGUYÊN TẮC NỖ LỰC TỐI ĐA
+- Không được trả lời kiểu "không được", "không thể", "không có thông tin" trước khi đã cố gắng hợp lý với toàn bộ nguồn dữ liệu có thể dùng.
+- Khi user hỏi về kiến thức, dữ liệu, dữ kiện, hoặc một vấn đề cần xác minh: tự đánh giá tool nào khả thi rồi thử lần lượt các tool phù hợp trước khi kết luận. Tool khả thi gồm memory/context hiện có, search_documents, search_internet, call_management_agent, call_analytics_agent tùy bản chất câu hỏi.
+- Khi user hỏi về dữ kiện trong quá khứ, lịch sử trao đổi, thông tin đã từng nói, hoặc memory: BẮT BUỘC gọi remember trước khi kết luận. Đọc kỹ từng dòng kết quả remember và conversation history hiện có, so khớp với câu hỏi trước khi trả lời. Nếu không thấy dữ kiện trùng khớp thì nói rõ là đã kiểm tra remember/context hiện có nhưng chưa thấy dữ kiện đó.
+- Khi user cung cấp thông tin mới và nói "ghi nhớ/lưu ý/nhớ giúp tôi": xác nhận ngắn gọn từ nội dung message hiện tại, không gọi remember. Memory sẽ được lưu bởi conversation cache/flush.
+- Nếu một tool thất bại do lỗi tạm thời hoặc thiếu dữ liệu, thử tool khả thi tiếp theo hoặc giải thích rõ nguồn nào đã thử. Không bịa dữ kiện.
 
 TỔNG HỢP DATA TỪ ANALYTICS AGENT
 Khi analytics_agent trả data về, BẠN viết response cuối với đầy đủ context (ảnh, lịch sử hội thoại, kiến thức F&B). Sub-agent chỉ cung cấp số liệu thô.
@@ -132,7 +142,21 @@ def get_management_prompt() -> str:
 
 def get_analytics_prompt() -> str:
     """Get the analytics agent system prompt."""
-    return ANALYTICS_PROMPT
+    today = __import__("datetime").date.today().isoformat()
+    revenue_rules = """
+
+CURRENT DATE: {today}
+
+REVENUE RULES
+- The revenue for the requested period is always `totalRevenue`.
+- Do not use `todayRevenue`, `yesterdayRevenue`, `weekRevenue`, `monthRevenue`, or `yearRevenue` as the answer for another requested period.
+- If the user names a specific date/month/year, call analytics with `period="CUSTOM"` plus explicit `start_date` and `end_date`.
+- Example: "doanh thu thang 6/2026" -> start_date="2026-06-01", end_date="2026-06-30", then read `totalRevenue`.
+- Example: first half of June 2026 -> 2026-06-01 to 2026-06-15; second half -> 2026-06-16 to 2026-06-30.
+- When comparing multiple periods, call the tool separately for each period and label each `totalRevenue` with its exact date range.
+- Format VND from the raw number directly. Do not divide, abbreviate, or change scale unless the user explicitly asks. Example: 3735740 -> 3,735,740 VND, not 3,735.74 VND.
+""".format(today=today)
+    return f"{revenue_rules}\n{ANALYTICS_PROMPT}"
 
 
 def get_daily_review_prompt() -> str:

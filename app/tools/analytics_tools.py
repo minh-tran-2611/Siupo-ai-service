@@ -12,6 +12,24 @@ BE_BASE_URL = os.getenv("BE_BASE_URL", "http://host.docker.internal:8080")
 TIMEOUT = httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0)
 
 
+def _analytics_params(period: str = "THIS_MONTH", start_date: str = None, end_date: str = None) -> dict:
+    if start_date or end_date:
+        period = "CUSTOM"
+
+    params = {"period": period}
+    if start_date:
+        params["startDate"] = _to_datetime(start_date)
+    if end_date:
+        params["endDate"] = _to_datetime(end_date, end_of_day=True)
+    return params
+
+
+def _extract_api_data(payload: dict) -> dict:
+    if isinstance(payload, dict) and "success" in payload and "data" in payload:
+        return payload.get("data") or {}
+    return payload
+
+
 def _to_datetime(value: str, end_of_day: bool = False) -> str:
     """Normalize a date/datetime string for the BE's LocalDateTime params.
 
@@ -53,16 +71,12 @@ async def get_analytics_summary(period: str = "THIS_MONTH", start_date: str = No
     """
     logger.info(f"Tool: get_analytics_summary(period={period}, start_date={start_date}, end_date={end_date})")
     
-    params = {"period": period}
-    if start_date:
-        params["startDate"] = _to_datetime(start_date)
-    if end_date:
-        params["endDate"] = _to_datetime(end_date, end_of_day=True)
+    params = _analytics_params(period, start_date, end_date)
     
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await make_request(client, "get", f"{BE_BASE_URL}/api/analytics/summary", params=params)
         response.raise_for_status()
-        return response.json()
+        return _extract_api_data(response.json())
 
 
 async def get_revenue_analytics(period: str = "THIS_MONTH", start_date: str = None, end_date: str = None) -> dict:
@@ -87,18 +101,14 @@ async def get_revenue_analytics(period: str = "THIS_MONTH", start_date: str = No
         - monthRevenue: Monthly revenue (VND)
         - yearRevenue: Yearly revenue (VND)
     """
-    logger.info(f"Tool: get_revenue_analytics(period={period})")
+    logger.info(f"Tool: get_revenue_analytics(period={period}, start_date={start_date}, end_date={end_date})")
     
-    params = {"period": period}
-    if start_date:
-        params["startDate"] = _to_datetime(start_date)
-    if end_date:
-        params["endDate"] = _to_datetime(end_date, end_of_day=True)
+    params = _analytics_params(period, start_date, end_date)
     
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await make_request(client, "get", f"{BE_BASE_URL}/api/analytics/revenue", params=params)
         response.raise_for_status()
-        return response.json()
+        return _extract_api_data(response.json())
 
 
 async def get_order_analytics(period: str = "THIS_MONTH", start_date: str = None, end_date: str = None) -> dict:
@@ -125,16 +135,12 @@ async def get_order_analytics(period: str = "THIS_MONTH", start_date: str = None
     """
     logger.info(f"Tool: get_order_analytics(period={period})")
     
-    params = {"period": period}
-    if start_date:
-        params["startDate"] = _to_datetime(start_date)
-    if end_date:
-        params["endDate"] = _to_datetime(end_date, end_of_day=True)
+    params = _analytics_params(period, start_date, end_date)
     
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await make_request(client, "get", f"{BE_BASE_URL}/api/analytics/orders", params=params)
         response.raise_for_status()
-        return response.json()
+        return _extract_api_data(response.json())
 
 
 async def get_product_analytics(limit: int = 10, period: str = "THIS_MONTH", start_date: str = None, end_date: str = None) -> dict:
@@ -158,16 +164,13 @@ async def get_product_analytics(limit: int = 10, period: str = "THIS_MONTH", sta
     """
     logger.info(f"Tool: get_product_analytics(limit={limit}, period={period})")
     
-    params = {"limit": limit, "period": period}
-    if start_date:
-        params["startDate"] = _to_datetime(start_date)
-    if end_date:
-        params["endDate"] = _to_datetime(end_date, end_of_day=True)
+    params = _analytics_params(period, start_date, end_date)
+    params["limit"] = limit
     
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await make_request(client, "get", f"{BE_BASE_URL}/api/analytics/products", params=params)
         response.raise_for_status()
-        return response.json()
+        return _extract_api_data(response.json())
 
 
 async def get_top_selling_products(limit: int = 10, period: str = "THIS_MONTH", start_date: str = None, end_date: str = None) -> dict:
@@ -185,16 +188,13 @@ async def get_top_selling_products(limit: int = 10, period: str = "THIS_MONTH", 
     """
     logger.info(f"Tool: get_top_selling_products(limit={limit}, period={period})")
     
-    params = {"limit": limit, "period": period}
-    if start_date:
-        params["startDate"] = _to_datetime(start_date)
-    if end_date:
-        params["endDate"] = _to_datetime(end_date, end_of_day=True)
+    params = _analytics_params(period, start_date, end_date)
+    params["limit"] = limit
     
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await make_request(client, "get", f"{BE_BASE_URL}/api/analytics/products/top-selling", params=params)
         response.raise_for_status()
-        return response.json()
+        return _extract_api_data(response.json())
 
 
 async def get_customer_analytics(period: str = "THIS_MONTH", start_date: str = None, end_date: str = None) -> dict:
@@ -216,16 +216,12 @@ async def get_customer_analytics(period: str = "THIS_MONTH", start_date: str = N
     """
     logger.info(f"Tool: get_customer_analytics(period={period})")
     
-    params = {"period": period}
-    if start_date:
-        params["startDate"] = _to_datetime(start_date)
-    if end_date:
-        params["endDate"] = _to_datetime(end_date, end_of_day=True)
+    params = _analytics_params(period, start_date, end_date)
     
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await make_request(client, "get", f"{BE_BASE_URL}/api/analytics/customers", params=params)
         response.raise_for_status()
-        return response.json()
+        return _extract_api_data(response.json())
 
 
 async def get_booking_analytics(period: str = "THIS_MONTH", start_date: str = None, end_date: str = None) -> dict:
@@ -252,16 +248,12 @@ async def get_booking_analytics(period: str = "THIS_MONTH", start_date: str = No
     """
     logger.info(f"Tool: get_booking_analytics(period={period})")
     
-    params = {"period": period}
-    if start_date:
-        params["startDate"] = _to_datetime(start_date)
-    if end_date:
-        params["endDate"] = _to_datetime(end_date, end_of_day=True)
+    params = _analytics_params(period, start_date, end_date)
     
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await make_request(client, "get", f"{BE_BASE_URL}/api/analytics/bookings", params=params)
         response.raise_for_status()
-        return response.json()
+        return _extract_api_data(response.json())
 
 
 async def get_analytics_insights() -> dict:
@@ -287,4 +279,4 @@ async def get_analytics_insights() -> dict:
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         response = await make_request(client, "get", f"{BE_BASE_URL}/api/analytics/insights")
         response.raise_for_status()
-        return response.json()
+        return _extract_api_data(response.json())

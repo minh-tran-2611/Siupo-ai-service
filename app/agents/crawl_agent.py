@@ -1,5 +1,6 @@
 import os
 import re
+from urllib.parse import urlparse
 from datetime import datetime
 
 import httpx
@@ -109,8 +110,16 @@ async def run_crawl_agent() -> dict:
                 logger.debug(f"Crawl Agent: No relevant content at '{url}', skipping store")
                 continue
 
-            title = f"Crawl {url.split('/')[2]} ngày {today}"
-            result = await add_document(title=title, content=extracted)
+            parsed_url = urlparse(url)
+            domain = parsed_url.netloc or url
+            title = f"Crawl {domain} ngày {today}"
+            indexable_content = (
+                f"Nguồn website: {domain}\n"
+                f"URL: {url}\n"
+                f"Ngày crawl: {today}\n\n"
+                f"{extracted}"
+            )
+            result = await add_document(title=title, content=indexable_content)
             chunks = result.get("chunks", 0) if isinstance(result, dict) else 0
             chunks_total += chunks
             pages_crawled += 1

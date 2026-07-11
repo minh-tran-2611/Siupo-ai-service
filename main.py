@@ -1,11 +1,12 @@
 import os
+import time
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
 # Load environment variables first
 load_dotenv()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
@@ -83,6 +84,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    client_host = request.client.host if request.client else "-"
+    logger.info(f"HTTP -> {request.method} {request.url.path} from={client_host}")
+
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        logger.exception(
+            f"HTTP !! {request.method} {request.url.path} "
+            f"duration={duration_ms}ms error={e}"
+        )
+        raise
+
+    duration_ms = int((time.perf_counter() - start) * 1000)
+    logger.info(
+        f"HTTP <- {request.method} {request.url.path} "
+        f"status={response.status_code} duration={duration_ms}ms"
+    )
+    return response
+
 
 # Include routers
 app.include_router(chat_router, prefix="/api", tags=["Chat"])

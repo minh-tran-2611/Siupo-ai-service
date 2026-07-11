@@ -2,7 +2,7 @@
 Chat Service — Thin orchestration layer.
 
 Flow (lazy-write strategy):
-1. Fetch long-term memories (consolidated + raw rows from previous sessions only)
+1. Fetch raw long-term memories from previous sessions only
 2. Read current session from cache (cache is the truth for current session)
 3. Add user turn to cache (NO Turso write per turn — flush happens on eviction)
 4. Start a task row (Task Pipeline)
@@ -14,12 +14,11 @@ import asyncio
 import time
 from loguru import logger
 
-from app.agents.orchestrator import run_orchestrator, current_task_id, _tool_sequence
+from app.agents.orchestrator import run_orchestrator, current_task_id, current_user_id, _tool_sequence
 from app.agents.image_describer import describe_image
 from app.agents.topic_classifier import classify_message
 from app.memory.sqlite_memory import (
     get_memories_by_user,
-    get_consolidated_memories_by_user,
 )
 from app.memory.conversation_cache import (
     get_conversation,
@@ -32,20 +31,15 @@ from app.memory.conversation_cache import (
 from app.memory.task_log import start_task, end_task, finalize_classification
 from app.events.agent_event_bus import emit as emit_event
 from app.tools.report_tools import created_files
+from app.utils.llm_utils import is_resource_exhausted_error
 
 
-def format_memory_context(memories: list[dict], consolidated: list[dict]) -> str:
+def format_memory_context(memories: list[dict]) -> str:
     """Format memories into simple context string (no LLM needed)."""
-    if not memories and not consolidated:
+    if not memories:
         return ""
 
     parts = []
-
-    # Consolidated memories (important summaries)
-    if consolidated:
-        parts.append("Tóm tắt về người dùng:")
-        for m in consolidated[:5]:
-            parts.append(f"- {m['summary']}")
 
     # Raw memories from previous sessions (raw_message is the truth) — all of them
     if memories:
@@ -56,6 +50,16 @@ def format_memory_context(memories: list[dict], consolidated: list[dict]) -> str
                 parts.append(f"- {text}")
 
     return "\n".join(parts)
+
+
+async def _build_memory_context(user_id: str, before_iso: str | None) -> tuple[str, int]:
+    memories = await get_memories_by_user(
+        user_id,
+        limit=None,
+        before=before_iso,
+        only_unconsolidated=True,
+    )
+    return format_memory_context(memories), len(memories)
 
 
 async def _classify_and_finalize(task_id: str, user_message: str, response: str):
@@ -113,33 +117,36 @@ async def chat(user_id: str, message: str, images: list[dict] | None = None) -> 
     # (so memories filter excludes anything written in this session by past flushes)
     session_start = get_session_start(user_id)
 
-    # Step 2: Long-term memory — fetch ONCE per session, then reuse from cache.
-    # consolidated + memories are ~static within a session (session_start is fixed
-    # and nothing flushes mid-session), so we only hit Turso on the first turn and
-    # store the formatted block on the session for the rest of the conversation.
-    memory_context = get_session_memory(user_id)
-    if memory_context is None:
+    # Step 2: Raw long-term memory - fetch ONCE per session, then reuse from cache.
+    # Consolidated memory is retrieved on demand by the orchestrator's remember tool.
+    # Raw memories are ~static within a session (session_start is fixed and nothing
+    # flushes mid-session), so we only hit Turso on the first turn and store the
+    # formatted block on the session for the rest of the conversation.
+    memory_context = ""
+    needs_long_term_memory = True
+    cached_memory_context = get_session_memory(user_id) if needs_long_term_memory else None
+    should_refresh_memory = needs_long_term_memory and cached_memory_context is None
+    if should_refresh_memory:
         before_iso = session_start.isoformat(sep=" ") if session_start else None
-        memories, consolidated = await asyncio.gather(
-            get_memories_by_user(
-                user_id,
-                limit=None,  # all unconsolidated rows from previous sessions
-                before=before_iso,
-                only_unconsolidated=True,
-            ),
-            get_consolidated_memories_by_user(user_id, limit=5),
+        memory_context, raw_count = await _build_memory_context(
+            user_id,
+            before_iso,
         )
-        memory_context = format_memory_context(memories, consolidated)
 
         # Counts only — the actual block is logged per-turn just before the
         # orchestrator call (see "Memory context fed to prompt" below).
         logger.info(
             f"Chat: Memory fetched from Turso for user {user_id} — "
-            f"raw={len(memories)}, consolidated={len(consolidated)}"
+            f"raw={raw_count}"
+        )
+    elif needs_long_term_memory:
+        memory_context = cached_memory_context or ""
+        logger.info(
+            f"Chat: Reusing cached memory context for user {user_id} (no Turso fetch)"
         )
     else:
         logger.info(
-            f"Chat: Reusing cached memory context for user {user_id} (no Turso fetch)"
+            f"Chat: Skipping long-term memory prefetch for user {user_id}; remember tool handles past/memory queries"
         )
 
     # Step 3: Read current session history from cache (current session truth)
@@ -155,7 +162,8 @@ async def chat(user_id: str, message: str, images: list[dict] | None = None) -> 
 
     # Persist the long-term memory block on the (now-existing) session so the next
     # turn reuses it from RAM instead of re-querying Turso.
-    set_session_memory(user_id, memory_context)
+    if needs_long_term_memory:
+        set_session_memory(user_id, memory_context)
 
     logger.info(
         f"Chat: Built context — history={len(conversation_history)} msgs, "
@@ -166,6 +174,7 @@ async def chat(user_id: str, message: str, images: list[dict] | None = None) -> 
     # Step 5: Start a task row + bind ContextVar so orchestrator tool calls get logged
     task_id = await start_task(user_id, message)
     current_task_id.set(task_id)
+    current_user_id.set(user_id)
     _tool_sequence.set(0)
 
     started_at = time.time()
@@ -203,6 +212,12 @@ async def chat(user_id: str, message: str, images: list[dict] | None = None) -> 
     except Exception as e:
         status = "failed"
         final_response = f"Đã có lỗi xảy ra: {e}"
+        if is_resource_exhausted_error(e):
+            final_response = (
+                "Gemini/Vertex AI đang bị giới hạn tài nguyên tạm thời (429). "
+                "Hệ thống đã thử lại nhiều lần nhưng vẫn chưa có capacity. "
+                "Bạn đợi khoảng 30-60 giây rồi gửi lại giúp tôi."
+            )
         logger.error(f"Chat: Orchestrator failed for task {task_id}: {e}")
     finally:
         await end_task(task_id, status, final_response, iterations)

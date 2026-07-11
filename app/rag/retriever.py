@@ -67,8 +67,10 @@ async def store_document(
         chunks.append(chunk)
         start = end - overlap
 
-    # Get embeddings for all chunks
-    embeddings = await get_embeddings_batch(chunks)
+    # Include title in the embedded text so metadata-only queries (file name,
+    # website/domain name, report title) can still retrieve the right chunks.
+    embedding_inputs = [f"Tiêu đề: {title}\n\n{chunk}" for chunk in chunks]
+    embeddings = await get_embeddings_batch(embedding_inputs)
 
     # Prepare points for Qdrant
     points = []

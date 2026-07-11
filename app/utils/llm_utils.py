@@ -29,19 +29,30 @@ def get_gemini_client() -> genai.Client:
     return _gemini_client
 
 
-async def call_llm_with_retry(generate_coro_fn, max_retries: int = 3, base_delay: float = 1.0):
+async def call_llm_with_retry(generate_coro_fn, max_retries: int | None = None, base_delay: float | None = None):
     """Call an LLM coroutine with exponential backoff retry on rate limiting (429/RESOURCE_EXHAUSTED)."""
+    if max_retries is None:
+        max_retries = int(os.getenv("LLM_MAX_RETRIES", "5"))
+    if base_delay is None:
+        base_delay = float(os.getenv("LLM_BASE_DELAY_SECONDS", "2.0"))
+
     for attempt in range(max_retries):
         try:
             return await generate_coro_fn()
         except Exception as e:
             error_str = str(e)
             if ("429" in error_str or "RESOURCE_EXHAUSTED" in error_str) and attempt < max_retries - 1:
-                delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                delay = min(30.0, base_delay * (2 ** attempt)) + random.uniform(0, 2)
                 logger.warning(f"LLM rate limited, retrying in {delay:.2f}s (attempt {attempt + 1}/{max_retries})")
                 await asyncio.sleep(delay)
             else:
                 raise
+
+
+def is_resource_exhausted_error(error: Exception) -> bool:
+    """Return True when the exception is a Vertex/Gemini quota/capacity error."""
+    error_str = str(error)
+    return "429" in error_str or "RESOURCE_EXHAUSTED" in error_str
 
 
 async def execute_tool(tool_functions: dict, name: str, args: dict, label: str = "") -> str:

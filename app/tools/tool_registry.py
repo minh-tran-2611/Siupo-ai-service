@@ -177,6 +177,7 @@ ANALYTICS_TOOL_NAMES = [
 # Orchestrator tools are meta-tools (call_management_agent, call_analytics_agent)
 # defined directly in orchestrator.py, not here.
 ORCHESTRATOR_TOOL_NAMES = [
+    "remember",
     "search_internet",
     "search_documents",
 ]
