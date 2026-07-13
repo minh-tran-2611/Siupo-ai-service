@@ -31,5 +31,10 @@ async def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
     if _model is None:
         init_embedder()
 
-    embeddings = _model.get_embeddings(texts)
-    return [e.values for e in embeddings]
+    # Bound request size so long web pages do not exceed Vertex batch limits.
+    batch_size = max(1, int(os.getenv("EMBEDDING_BATCH_SIZE", "20")))
+    values: list[list[float]] = []
+    for start in range(0, len(texts), batch_size):
+        embeddings = _model.get_embeddings(texts[start:start + batch_size])
+        values.extend(e.values for e in embeddings)
+    return values

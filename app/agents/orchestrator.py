@@ -13,7 +13,12 @@ from app.tools.search_tools import search_internet
 from app.tools.memory_tools import remember
 from app.agents.management_agent import run_management_agent
 from app.agents.analytics_agent import run_analytics_agent
-from app.rag.retriever import retrieve_relevant_chunks
+from app.rag.retriever import (
+    get_daily_digest,
+    get_document_content,
+    retrieve_relevant_chunks,
+    stable_document_id,
+)
 from app.tools.gmail_tools import send_email_notification
 from app.tools.zalo_notify_tools import send_zalo_notification
 from app.memory.task_log import log_tool_call
@@ -27,13 +32,32 @@ current_task_id: ContextVar[str | None] = ContextVar("current_task_id", default=
 _tool_sequence: ContextVar[int] = ContextVar("_tool_sequence", default=0)
 
 
-async def _search_documents(query: str) -> dict:
-    """Search internal documents via RAG."""
-    chunks = await retrieve_relevant_chunks(query, top_k=5)
+async def _search_documents(
+    query: str,
+    source_type: str | None = None,
+    topic: str | None = None,
+) -> dict:
+    """Search the structured knowledge base with optional source routing."""
+    chunks = await retrieve_relevant_chunks(
+        query,
+        top_k=8,
+        candidate_k=40,
+        source_type=source_type,
+        topic=topic,
+    )
     if not chunks:
         return {"results": [], "message": "Không tìm thấy tài liệu liên quan."}
     results = [
-        {"title": chunk["title"], "content": chunk["content"]}
+        {
+            "title": chunk["title"],
+            "content": chunk["content"],
+            "source_type": chunk.get("source_type"),
+            "topic": chunk.get("topic"),
+            "source_url": chunk.get("canonical_url"),
+            "published_at": chunk.get("published_at"),
+            "crawled_at": chunk.get("crawled_at"),
+            "score": chunk.get("score"),
+        }
         for chunk in chunks
     ]
     return {"results": results}
@@ -326,11 +350,36 @@ async def run_daily_review_orchestrator() -> None:
     today = datetime.now().strftime("%Y-%m-%d")
     logger.info(f"Daily Review Orchestrator: Starting review for {today}")
 
+    # The daily agent receives the complete digest directly. Retrieval remains a
+    # fallback, not the mechanism used to sample a large corpus with top-k.
+    digest = await get_daily_digest(today)
+    market_intel = await get_document_content(
+        stable_document_id("market", f"market-intel:{today}")
+    )
+    if digest:
+        review_context = (
+            f"[FULL_DAILY_DIGEST date={today} sources={digest.get('source_count', 0)}]\n"
+            f"{digest['content']}\n"
+            "[/FULL_DAILY_DIGEST]\n\n"
+            "Đọc toàn bộ bản tin trên, kiểm tra mục COVERAGE và thực hiện đánh giá."
+        )
+    else:
+        review_context = (
+            f"[DAILY_DIGEST_MISSING date={today}]\n"
+            "Chưa có bản tin crawl toàn phần hôm nay. Dùng search_documents để kiểm tra "
+            "dữ liệu mới nhất, nhưng phải nêu rõ độ phủ dữ liệu trước khi cảnh báo."
+        )
+    if market_intel:
+        review_context += (
+            f"\n\n[DAILY_WEB_SEARCH_INTEL date={today}]\n{market_intel}\n"
+            "[/DAILY_WEB_SEARCH_INTEL]"
+        )
+
     contents = [
         types.Content(
             role="user",
             parts=[types.Part.from_text(
-                text=f"Thực hiện kiểm tra thị trường hàng ngày cho ngày {today}."
+                text=review_context
             )]
         )
     ]

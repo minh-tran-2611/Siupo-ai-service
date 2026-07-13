@@ -869,10 +869,17 @@ ORCHESTRATOR_DECLARATIONS = [
         ),
         types.FunctionDeclaration(
             name="search_documents",
-            description="Search internal documents, policies, reports, and guides (RAG).",
+            description="Search the routed knowledge base: internal documents, regulations, market sources, and daily digests.",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
-                properties={"query": types.Schema(type=types.Type.STRING, description="Document search query")},
+                properties={
+                    "query": types.Schema(type=types.Type.STRING, description="Specific document or fact search query"),
+                    "source_type": types.Schema(
+                        type=types.Type.STRING,
+                        description="Optional scope: internal, regulatory, market, or daily_digest",
+                    ),
+                    "topic": types.Schema(type=types.Type.STRING, description="Optional exact topic filter"),
+                },
                 required=["query"]
             )
         ),
@@ -946,10 +953,17 @@ DAILY_REVIEW_DECLARATIONS = [
     types.Tool(function_declarations=[
         types.FunctionDeclaration(
             name="search_documents",
-            description="Search internal knowledge base (RAG) for today's market intelligence.",
+            description="Fallback search in the structured knowledge base when the full daily digest is missing or needs verification.",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
-                properties={"query": types.Schema(type=types.Type.STRING, description="Search query")},
+                properties={
+                    "query": types.Schema(type=types.Type.STRING, description="Specific verification query"),
+                    "source_type": types.Schema(
+                        type=types.Type.STRING,
+                        description="Optional scope: internal, regulatory, market, or daily_digest",
+                    ),
+                    "topic": types.Schema(type=types.Type.STRING, description="Optional exact topic filter"),
+                },
                 required=["query"]
             )
         ),

@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from google.genai import types
 from loguru import logger
 
 from app.utils.llm_utils import get_gemini_client, call_llm_with_retry
 from app.tools.search_tools import search_internet
 from app.service.rag_service import add_document
+from app.rag.retriever import stable_document_id
 
 
 MARKET_INTEL_QUERIES = [
@@ -69,7 +70,15 @@ async def run_market_intel_agent() -> str:
         return ""
 
     title = f"Thị trường F&B ngày {today}"
-    await add_document(title=title, content=synthesized)
+    await add_document(
+        title=title,
+        content=synthesized,
+        source_type="market",
+        document_id=stable_document_id("market", f"market-intel:{today}"),
+        topic="market_intelligence",
+        authority_level=2,
+        expires_at=(datetime.now(timezone.utc) + timedelta(days=90)).isoformat(),
+    )
     logger.info(f"Market Intel Agent: Stored '{title}' to Qdrant")
 
     return synthesized

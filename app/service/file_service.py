@@ -5,6 +5,7 @@ Coordinates Turso registry, local FS blob storage, and Qdrant chunks.
 import os
 import uuid
 import asyncio
+import unicodedata
 from pathlib import Path
 from loguru import logger
 
@@ -21,6 +22,17 @@ from app.utils.file_parser import (
 
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "data/uploads"))
 MAX_FILE_SIZE = int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(25 * 1024 * 1024)))  # 25 MB
+
+
+def _internal_topic(filename: str, description: str | None) -> str:
+    text = unicodedata.normalize("NFKD", f"{filename} {description or ''}".casefold())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.replace("_", " ").replace("-", " ")
+    if any(term in text for term in ("chinh sach", "policy", "quy dinh", "so tay")):
+        return "restaurant_policy"
+    if any(term in text for term in ("bao cao", "report", "analytics", "phan tich")):
+        return "analytics_report"
+    return "uploaded_document"
 
 
 def _ensure_upload_dir():
@@ -94,6 +106,10 @@ async def upload_file(
                     title=filename,
                     content=indexable_text,
                     file_id=file_id,
+                    source_type="internal",
+                    topic=_internal_topic(filename, description),
+                    authority_level=5,
+                    metadata={"uploaded_by": uploaded_by or "admin", "document_kind": file_type},
                 )
                 await file_log.mark_indexed(file_id, chunk_count)
                 logger.info(f"FileService: Indexed {filename} → {chunk_count} chunks in Qdrant")

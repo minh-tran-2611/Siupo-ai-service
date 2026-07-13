@@ -88,7 +88,15 @@ async def create_analytics_report(title: str, content: str, topic: str = "") -> 
     chunk_count = 0
     try:
         indexable = f"Tên file: {filename}\nMô tả: Báo cáo phân tích tự sinh: {title}\n\n{body}"
-        chunk_count = await store_document(title=title, content=indexable, file_id=file_id)
+        chunk_count = await store_document(
+            title=title,
+            content=indexable,
+            file_id=file_id,
+            source_type="internal",
+            topic="analytics_report",
+            authority_level=4,
+            metadata={"uploaded_by": "analytics-agent", "document_kind": "analytics_report"},
+        )
         await file_log.mark_indexed(file_id, chunk_count)
         logger.info(f"ReportTool: Indexed {filename} → {chunk_count} chunks in Qdrant")
     except Exception as e:
