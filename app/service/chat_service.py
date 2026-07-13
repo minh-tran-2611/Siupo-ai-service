@@ -14,11 +14,11 @@ import asyncio
 import time
 from loguru import logger
 
-from app.agents.orchestrator import run_orchestrator, current_task_id, current_user_id, _tool_sequence
+from app.agents.orchestrator import run_orchestrator, current_task_id, _tool_sequence
 from app.agents.image_describer import describe_image
 from app.agents.topic_classifier import classify_message
 from app.memory.sqlite_memory import (
-    get_memories_by_user,
+    get_memories,
 )
 from app.memory.conversation_cache import (
     get_conversation,
@@ -52,9 +52,8 @@ def format_memory_context(memories: list[dict]) -> str:
     return "\n".join(parts)
 
 
-async def _build_memory_context(user_id: str, before_iso: str | None) -> tuple[str, int]:
-    memories = await get_memories_by_user(
-        user_id,
+async def _build_memory_context(before_iso: str | None) -> tuple[str, int]:
+    memories = await get_memories(
         limit=None,
         before=before_iso,
         only_unconsolidated=True,
@@ -129,7 +128,6 @@ async def chat(user_id: str, message: str, images: list[dict] | None = None) -> 
     if should_refresh_memory:
         before_iso = session_start.isoformat(sep=" ") if session_start else None
         memory_context, raw_count = await _build_memory_context(
-            user_id,
             before_iso,
         )
 
@@ -174,7 +172,6 @@ async def chat(user_id: str, message: str, images: list[dict] | None = None) -> 
     # Step 5: Start a task row + bind ContextVar so orchestrator tool calls get logged
     task_id = await start_task(user_id, message)
     current_task_id.set(task_id)
-    current_user_id.set(user_id)
     _tool_sequence.set(0)
 
     started_at = time.time()
