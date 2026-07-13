@@ -166,14 +166,13 @@ async def bulk_save_memories(user_id: str, raw_messages: list[str]) -> int:
     return await asyncio.to_thread(_sync)
 
 
-async def get_memories_by_user(
-    user_id: str,
+async def get_memories(
     limit: int | None = 20,
     before: str | None = None,
     only_unconsolidated: bool = False,
     offset: int = 0,
 ) -> list[dict]:
-    """Get recent memories for a user.
+    """Get recent memories across all chat channels.
 
     Args:
         limit: Max rows to return. Pass None to fetch ALL matching rows (no LIMIT).
@@ -183,12 +182,13 @@ async def get_memories_by_user(
     """
     def _sync():
         with _db_client() as client:
-            sql = "SELECT id, summary, entities, topics, raw_message, created_at FROM memories WHERE user_id = ?"
-            params: list = [user_id]
+            sql = "SELECT id, summary, entities, topics, raw_message, created_at FROM memories"
+            params: list = []
             if only_unconsolidated:
-                sql += " AND consolidated = 0"
+                sql += " WHERE consolidated = 0"
             if before is not None:
-                sql += " AND created_at < ?"
+                sql += " AND" if only_unconsolidated else " WHERE"
+                sql += " created_at < ?"
                 params.append(before)
             sql += " ORDER BY created_at DESC"
             if limit is not None:
@@ -211,20 +211,20 @@ async def get_memories_by_user(
     return await asyncio.to_thread(_sync)
 
 
-async def count_memories_by_user(
-    user_id: str,
+async def count_memories(
     before: str | None = None,
     only_unconsolidated: bool = False,
 ) -> int:
-    """Count memory rows for a user."""
+    """Count memory rows across all chat channels."""
     def _sync():
         with _db_client() as client:
-            sql = "SELECT COUNT(*) FROM memories WHERE user_id = ?"
-            params: list = [user_id]
+            sql = "SELECT COUNT(*) FROM memories"
+            params: list = []
             if only_unconsolidated:
-                sql += " AND consolidated = 0"
+                sql += " WHERE consolidated = 0"
             if before is not None:
-                sql += " AND created_at < ?"
+                sql += " AND" if only_unconsolidated else " WHERE"
+                sql += " created_at < ?"
                 params.append(before)
             result = client.execute(sql, params)
             return int(result.rows[0][0])
@@ -232,19 +232,18 @@ async def count_memories_by_user(
     return await asyncio.to_thread(_sync)
 
 
-async def get_consolidated_memories_by_user(
-    user_id: str,
+async def get_consolidated_memories(
     limit: int | None = 10,
     offset: int = 0,
 ) -> list[dict]:
-    """Get consolidated memories for a user."""
+    """Get consolidated memories across all chat channels."""
     def _sync():
         with _db_client() as client:
             sql = (
                 "SELECT id, summary, entities, topics, period, created_at "
-                "FROM consolidated_memories WHERE user_id = ? ORDER BY created_at DESC"
+                "FROM consolidated_memories ORDER BY created_at DESC"
             )
-            params: list = [user_id]
+            params: list = []
             if limit is not None:
                 sql += " LIMIT ?"
                 params.append(limit)
@@ -265,14 +264,11 @@ async def get_consolidated_memories_by_user(
     return await asyncio.to_thread(_sync)
 
 
-async def count_consolidated_memories_by_user(user_id: str) -> int:
-    """Count consolidated memory rows for a user."""
+async def count_consolidated_memories() -> int:
+    """Count consolidated memory rows across all chat channels."""
     def _sync():
         with _db_client() as client:
-            result = client.execute(
-                "SELECT COUNT(*) FROM consolidated_memories WHERE user_id = ?",
-                [user_id],
-            )
+            result = client.execute("SELECT COUNT(*) FROM consolidated_memories")
             return int(result.rows[0][0])
 
     return await asyncio.to_thread(_sync)
@@ -340,15 +336,15 @@ async def mark_memories_as_consolidated(memory_ids: list[int]):
     await asyncio.to_thread(_sync)
 
 
-async def search_memories_by_topics(user_id: str, topics: list[str], limit: int = 10) -> list[dict]:
-    """Search memories by matching topics."""
+async def search_memories_by_topics(topics: list[str], limit: int = 10) -> list[dict]:
+    """Search memories by matching topics across all chat channels."""
     def _sync():
         with _db_client() as client:
             conditions = " OR ".join(["topics LIKE ?" for _ in topics])
-            params = [user_id] + [f"%{topic}%" for topic in topics] + [limit]
+            params = [f"%{topic}%" for topic in topics] + [limit]
             result = client.execute(
                 f"SELECT id, summary, entities, topics, raw_message, created_at "
-                f"FROM memories WHERE user_id = ? AND ({conditions}) ORDER BY created_at DESC LIMIT ?",
+                f"FROM memories WHERE ({conditions}) ORDER BY created_at DESC LIMIT ?",
                 params
             )
             return [
@@ -364,14 +360,13 @@ async def search_memories_by_topics(user_id: str, topics: list[str], limit: int 
     return await asyncio.to_thread(_sync)
 
 
-async def get_all_memories_by_user(user_id: str) -> list[dict]:
-    """Get ALL memories for a user (no limit), ordered by newest first."""
+async def get_all_memories() -> list[dict]:
+    """Get all memories across all chat channels, ordered by newest first."""
     def _sync():
         with _db_client() as client:
             result = client.execute(
                 "SELECT id, summary, entities, topics, raw_message, created_at "
-                "FROM memories WHERE user_id = ? ORDER BY created_at DESC",
-                [user_id]
+                "FROM memories ORDER BY created_at DESC"
             )
             return [
                 {

@@ -23,7 +23,6 @@ from app.utils.prompt_builder import get_daily_review_prompt
 
 # Per-request task id used to attribute orchestrator-level tool calls.
 current_task_id: ContextVar[str | None] = ContextVar("current_task_id", default=None)
-current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 # Sequence counter per request — incremented for each tool call within a task.
 _tool_sequence: ContextVar[int] = ContextVar("_tool_sequence", default=0)
 
@@ -41,11 +40,8 @@ async def _search_documents(query: str) -> dict:
 
 
 async def _remember(query: str) -> dict:
-    """Retrieve long-term memory for the current user."""
-    user_id = current_user_id.get()
-    if not user_id:
-        return {"error": "No current user_id available for remember tool"}
-    return await remember(user_id=user_id, query=query)
+    """Retrieve long-term memory across all chat channels."""
+    return await remember(query=query)
 
 
 # Meta-tool functions — maps tool names to actual execution

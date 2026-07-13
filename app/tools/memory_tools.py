@@ -5,9 +5,9 @@ import unicodedata
 from loguru import logger
 
 from app.memory.sqlite_memory import (
-    count_consolidated_memories_by_user,
-    get_consolidated_memories_by_user,
-    get_memories_by_user,
+    count_consolidated_memories,
+    get_consolidated_memories,
+    get_memories,
 )
 
 
@@ -53,23 +53,22 @@ def _third_windows(total: int) -> list[tuple[int, int, str]]:
     ]
 
 
-async def remember(user_id: str, query: str) -> dict:
-    """Retrieve relevant past conversation memory for a user."""
-    logger.info(f"Tool: remember(user_id={user_id}, query={query})")
+async def remember(query: str) -> dict:
+    """Retrieve relevant past conversation memory across all chat channels."""
+    logger.info(f"Tool: remember(query={query})")
 
-    raw_memories = await get_memories_by_user(
-        user_id=user_id,
+    raw_memories = await get_memories(
         limit=None,
         only_unconsolidated=True,
     )
 
     consolidated_matches: list[dict] = []
-    total_consolidated = await count_consolidated_memories_by_user(user_id)
+    total_consolidated = await count_consolidated_memories()
     scanned_windows = []
     for offset, limit, label in _third_windows(total_consolidated):
         if limit <= 0:
             continue
-        rows = await get_consolidated_memories_by_user(user_id, limit=limit, offset=offset)
+        rows = await get_consolidated_memories(limit=limit, offset=offset)
         scanned_windows.append({"window": label, "offset": offset, "limit": limit, "rows": len(rows)})
         if _matches(rows, query):
             consolidated_matches = rows
@@ -95,4 +94,3 @@ async def remember(user_id: str, query: str) -> dict:
         "consolidated_scanned_windows": scanned_windows,
         "consolidated_results": consolidated_matches,
     }
-
