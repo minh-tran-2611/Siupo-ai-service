@@ -819,13 +819,15 @@ ORCHESTRATOR_DECLARATIONS = [
         - Manage customer accounts
         - Any CRUD operation on restaurant data
 
-        IMPORTANT: Pass the COMPLETE user request as the task parameter.
-        Include all details (names, prices, quantities, etc.) so the agent can work autonomously.""",
+        IMPORTANT: Pass a self-contained brief, not just a short paraphrase. Include the complete user request,
+        current date, normalized date range, names/prices/quantities/constraints, desired output, and any relevant
+        findings already obtained from internet search, documents, memory, or Analytics Agent. The Management Agent
+        should receive enough evidence and context to investigate with its own tools without guessing.""",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
                     "task": types.Schema(type=types.Type.STRING,
-                                         description="Complete task description with all details from user request")
+                                         description="Self-contained brief with request, current date/date range, constraints, desired output, and relevant prior tool/agent findings")
                 },
                 required=["task"]
             )
@@ -843,13 +845,15 @@ ORCHESTRATOR_DECLARATIONS = [
         - Get business insights or recommendations
         - Any analysis, reporting, or data-driven question
 
-        IMPORTANT: Pass the COMPLETE user request as the task parameter.
-        Include time period or specific metrics if mentioned.""",
+        IMPORTANT: Pass a self-contained brief, not just a short paraphrase. Include the complete user request,
+        current date, normalized date range, requested metrics/comparisons, desired output, and any relevant findings
+        already obtained from internet search, documents, memory, or Management Agent. Ask it to identify the internal
+        tools/data sources used and any remaining gaps instead of guessing.""",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
                     "task": types.Schema(type=types.Type.STRING,
-                                         description="Complete analytics task with time period and specific metrics")
+                                         description="Self-contained analytics brief with current date/date range, metrics, comparisons, desired output, and relevant prior tool/agent findings")
                 },
                 required=["task"]
             )
