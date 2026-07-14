@@ -1,4 +1,5 @@
 import os
+from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 
@@ -18,9 +19,11 @@ MARKET_INTEL_HOUR = int(os.getenv("MARKET_INTEL_HOUR", "5"))
 MARKET_INTEL_MINUTE = int(os.getenv("MARKET_INTEL_MINUTE", "30"))
 DAILY_REVIEW_HOUR = int(os.getenv("DAILY_REVIEW_HOUR", "6"))
 DAILY_REVIEW_MINUTE = int(os.getenv("DAILY_REVIEW_MINUTE", "0"))
-CRAWL_INTERVAL_HOURS = int(os.getenv("CRAWL_INTERVAL_HOURS", "24"))
+CRAWL_HOUR = int(os.getenv("CRAWL_HOUR", "4"))
+CRAWL_MINUTE = int(os.getenv("CRAWL_MINUTE", "0"))
+APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Asia/Bangkok")
 
-scheduler = AsyncIOScheduler()
+scheduler = AsyncIOScheduler(timezone=ZoneInfo(APP_TIMEZONE))
 
 # Shared crawl status — read by agents_controller GET /agents/crawl/status
 crawl_status: dict = {
@@ -28,6 +31,11 @@ crawl_status: dict = {
     "status": "idle",
     "pages_crawled": 0,
     "chunks_indexed": 0,
+    "sources_configured": 0,
+    "sources_changed": 0,
+    "sources_unchanged": 0,
+    "sources_failed": 0,
+    "digest_source_count": 0,
     "error": None,
 }
 
@@ -111,11 +119,30 @@ async def _crawl_with_emit():
     ok = True
     pages = 0
     chunks = 0
+    crawl_metrics = {
+        "sources_configured": 0,
+        "sources_changed": 0,
+        "sources_unchanged": 0,
+        "sources_failed": 0,
+        "digest_source_count": 0,
+    }
     try:
         from app.agents.crawl_agent import run_crawl_agent
+        from app.rag.retriever import cleanup_expired_documents
         result = await run_crawl_agent()
         pages = result.get("pages_crawled", 0) if isinstance(result, dict) else 0
         chunks = result.get("chunks_indexed", 0) if isinstance(result, dict) else 0
+        if isinstance(result, dict):
+            crawl_metrics = {
+                key: result.get(key, 0)
+                for key in (
+                    "sources_configured", "sources_changed", "sources_unchanged",
+                    "sources_failed", "digest_source_count",
+                )
+            }
+        expired = await cleanup_expired_documents()
+        if expired:
+            logger.info(f"Crawl Agent: removed {expired} expired knowledge chunks")
     except Exception:
         ok = False
         raise
@@ -125,6 +152,7 @@ async def _crawl_with_emit():
             last_run=_dt.datetime.utcnow().isoformat() + "Z",
             pages_crawled=pages,
             chunks_indexed=chunks,
+            **crawl_metrics,
             error=None if ok else "Crawl thất bại — xem log server",
         )
         emit_event("agent.invoke.end", agent_id="crawl_agent", ok=ok)
@@ -191,8 +219,9 @@ def start_scheduler():
     )
     scheduler.add_job(
         _crawl_with_emit,
-        "interval",
-        hours=CRAWL_INTERVAL_HOURS,
+        "cron",
+        hour=CRAWL_HOUR,
+        minute=CRAWL_MINUTE,
         id="crawl_agent_job",
         replace_existing=True,
     )
@@ -202,7 +231,7 @@ def start_scheduler():
         f"cache_cleanup={CACHE_CLEANUP_INTERVAL_MINUTES}m, "
         f"market_intel={MARKET_INTEL_HOUR:02d}:{MARKET_INTEL_MINUTE:02d}, "
         f"daily_review={DAILY_REVIEW_HOUR:02d}:{DAILY_REVIEW_MINUTE:02d}, "
-        f"crawl={CRAWL_INTERVAL_HOURS}h"
+        f"crawl={CRAWL_HOUR:02d}:{CRAWL_MINUTE:02d}, timezone={APP_TIMEZONE}"
     )
 
 

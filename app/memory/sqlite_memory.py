@@ -118,6 +118,24 @@ async def init_db():
             """)
             client.execute("CREATE INDEX IF NOT EXISTS idx_files_created ON files(created_at DESC)")
             client.execute("CREATE INDEX IF NOT EXISTS idx_files_type ON files(file_type)")
+
+            # ── Durable crawl state (Cloud Run filesystem is ephemeral) ──────
+            client.execute("""
+                CREATE TABLE IF NOT EXISTS crawl_source_state (
+                    canonical_url       TEXT PRIMARY KEY,
+                    document_id         TEXT NOT NULL,
+                    raw_hash            TEXT,
+                    etag                TEXT,
+                    last_modified       TEXT,
+                    last_status         TEXT,
+                    last_error          TEXT,
+                    consecutive_failures INTEGER DEFAULT 0,
+                    last_crawled_at      TIMESTAMP,
+                    last_changed_at      TIMESTAMP,
+                    updated_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            client.execute("CREATE INDEX IF NOT EXISTS idx_crawl_state_status ON crawl_source_state(last_status)")
         logger.info("Database initialized")
 
     await asyncio.to_thread(_sync)
